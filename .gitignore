@@ -1,0 +1,8 @@
+.env
+temp/
+data/
+customer_master_data/
+.gradio
+.claude
+.vscode
+__pycache__
