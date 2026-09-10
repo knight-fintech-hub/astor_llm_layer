@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 
 
 from database import execute_write, execute_query, execute_one
+from error_logger import log_error
 from logger import get_logger
 
 logger = get_logger(__name__)
@@ -148,6 +149,15 @@ class Session:
             logger.info(f"[CallLog] Written for session: {self.session_id}")
         except Exception as e:
             logger.error(f"[CallLog] Failed to write: {e}")
+            log_error(
+                "call_log_write_error",
+                f"Failed to write call_log for session '{self.session_id}': {e}",
+                session_id=self.session_id,
+                agent_id=self.agent_id,
+                error_detail={"exception": str(e)},
+                source_module="memory_store",
+                source_function="_write_call_log",
+            )
 
     def save_state(self):
         """Persist current state to DB (called periodically or on important changes)."""

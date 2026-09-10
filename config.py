@@ -72,6 +72,10 @@ class Config:
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 
+    # Error log retention — how many days to keep rows in the error_logs table.
+    # Set to -1 to keep records forever (no auto-deletion).
+    ERROR_LOG_RETENTION_DAYS: int = int(os.getenv("ERROR_LOG_RETENTION_DAYS", "90"))
+
     # Data directory (fallback for CBS CSV data)
     DATA_DIR: str = os.path.join(os.path.dirname(__file__), "data")
 

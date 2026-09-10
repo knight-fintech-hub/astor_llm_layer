@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field
 
 from config import cfg
 from database import execute_query, execute_one, execute_write
+from error_logger import log_error
 from logger import get_logger
 
 logger = get_logger(__name__)
@@ -385,8 +386,16 @@ async def execute_tool(tool_id: str, variables: Dict[str, str]) -> Dict[str, str
     Returns a dict of new variable mappings from the response.
     """
     tool = tool_store.get(tool_id)
-    if not tool:
+    if not tool:    
         logger.warning(f"[ToolExec] Tool not found: {tool_id}")
+        log_error(
+            "tool_not_found",
+            f"Tool '{tool_id}' not found in registry",
+            severity="WARNING",
+            tool_id=tool_id,
+            source_module="tool_registry",
+            source_function="execute_tool",
+        )
         return {}
 
     # Auto-generate OTP if the tool's request body needs {GeneratedOTP} or {OTP}
@@ -506,6 +515,20 @@ async def execute_tool(tool_id: str, variables: Dict[str, str]) -> Dict[str, str
 
         if resp.status_code not in (200, 201):
             logger.warning(f"[ToolExec] Failed: {resp.status_code} - {resp.text[:200]}")
+            log_error(
+                "tool_http_error",
+                f"Tool '{tool['name']}' returned HTTP {resp.status_code}",
+                severity="WARNING",
+                tool_id=tool_id,
+                tool_name=tool["name"],
+                endpoint=url,
+                http_method=method,
+                http_status=resp.status_code,
+                error_detail={"response_body": resp.text[:500]},
+                request_payload=processed_body if isinstance(processed_body, dict) else None,
+                source_module="tool_registry",
+                source_function="execute_tool",
+            )
             return {}
 
         # Try to parse JSON response
@@ -550,22 +573,59 @@ async def execute_tool(tool_id: str, variables: Dict[str, str]) -> Dict[str, str
 
     except httpx.ConnectError:
         logger.error(f"[ToolExec] Connection failed for {url}")
+        log_error(
+            "tool_connection_error",
+            f"Tool '{tool['name']}' — connection refused or server unreachable: {url}",
+            tool_id=tool_id,
+            tool_name=tool["name"],
+            endpoint=url,
+            http_method=method,
+            http_status=0,
+            request_payload=processed_body if isinstance(processed_body, dict) else None,
+            source_module="tool_registry",
+            source_function="execute_tool",
+        )
         return {}
     except httpx.TimeoutException:
         logger.error(f"[ToolExec] Timeout for {url}")
+        log_error(
+            "tool_timeout_error",
+            f"Tool '{tool['name']}' — request timed out after {tool.get('x_timeout_ms', 30000)}ms: {url}",
+            tool_id=tool_id,
+            tool_name=tool["name"],
+            endpoint=url,
+            http_method=method,
+            error_detail={"timeout_ms": tool.get("x_timeout_ms", 30000)},
+            request_payload=processed_body if isinstance(processed_body, dict) else None,
+            source_module="tool_registry",
+            source_function="execute_tool",
+        )
         return {}
     except Exception as e:
         logger.error(f"[ToolExec] Error executing {tool['name']}: {e}")
+        log_error(
+            "tool_http_error",
+            f"Tool '{tool['name']}' — unexpected error: {e}",
+            severity="CRITICAL",
+            tool_id=tool_id,
+            tool_name=tool["name"],
+            endpoint=url,
+            http_method=method,
+            error_detail={"exception": str(e)},
+            request_payload=processed_body if isinstance(processed_body, dict) else None,
+            source_module="tool_registry",
+            source_function="execute_tool",
+        )
         return {}
 
 
 # ── Async Tool Dispatch (fire-and-forget) ───────────────────────────────────
-#
+
 # Tools flagged x_execution_mode="async" don't block the turn: dispatch_tool()
 # kicks execute_tool() off as a background asyncio.Task and returns a stub
 # immediately. The real result is written to async_tool_jobs and picked up
 # by orchestrator.collect_background_results() on a later turn (poll-and-inject).
-#
+
 # Callers MUST route every tool call through dispatch_tool() instead of
 # execute_tool() directly — it's the single choke point that makes async
 # tools transparent to the rest of the orchestrator.
@@ -630,9 +690,26 @@ async def _run_async_tool_job(job_id: str, tool_id: str, variables: Dict[str, st
     except asyncio.TimeoutError:
         job_store.mark_failed(job_id, f"Timed out after {timeout_ms}ms")
         logger.warning(f"[AsyncTool] Job {job_id} ({tool_id}) timed out after {timeout_ms}ms")
+        log_error(
+            "async_tool_error",
+            f"Async job {job_id} timed out after {timeout_ms}ms",
+            severity="WARNING",
+            tool_id=tool_id,
+            error_detail={"job_id": job_id, "timeout_ms": timeout_ms},
+            source_module="tool_registry",
+            source_function="_run_async_tool_job",
+        )
     except Exception as e:
         job_store.mark_failed(job_id, str(e))
         logger.error(f"[AsyncTool] Job {job_id} ({tool_id}) failed: {e}")
+        log_error(
+            "async_tool_error",
+            f"Async job {job_id} failed: {e}",
+            tool_id=tool_id,
+            error_detail={"job_id": job_id, "exception": str(e)},
+            source_module="tool_registry",
+            source_function="_run_async_tool_job",
+        )
 
 
 async def dispatch_tool(tool_id: str, variables: Dict[str, str], conversation_id: str) -> Dict[str, Any]:
@@ -652,7 +729,20 @@ async def dispatch_tool(tool_id: str, variables: Dict[str, str], conversation_id
     """
     tool = tool_store.get(tool_id)
     if not tool or tool.get("x_execution_mode", "sync") != "async":
-        return await execute_tool(tool_id, variables)
+        try:
+            return await execute_tool(tool_id, variables)
+        except Exception as e:
+            log_error(
+                "tool_http_error",
+                f"dispatch_tool: unexpected error executing tool '{tool_id}': {e}",
+                severity="CRITICAL",
+                tool_id=tool_id,
+                tool_name=tool["name"] if tool else tool_id,
+                error_detail={"exception": str(e), "exception_type": type(e).__name__},
+                source_module="tool_registry",
+                source_function="dispatch_tool",
+            )
+            return {}
 
     job_id = job_store.create(tool_id, conversation_id)
     timeout_ms = tool.get("x_timeout_ms", 30000)

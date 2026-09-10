@@ -26,6 +26,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 
 from config import cfg
+from error_logger import log_error
 from logger import get_logger
 
 logger = get_logger(__name__)
@@ -635,48 +636,54 @@ class LLMEngine:
 
         max_tokens = cfg.MAX_NEW_TOKENS
 
-        if self._kv_cache is not None:
-            # Build the messages list that follows the system prompt
-            # (history + current user turn). The system prompt itself is
-            # handled separately by the KV cache prefill path.
-            #
-            # IMPORTANT: dynamic_context is injected here — NOT into system_prompt —
-            # so the cache key (hash of system_prompt) stays stable every turn.
-            remaining_messages = list(history)
-            if dynamic_context:
-                remaining_messages.append({
-                    "role": "user",
-                    "content": f"[Context]\n{dynamic_context}",
-                })
-                remaining_messages.append({
-                    "role": "assistant",
-                    "content": "Understood, I have the context.",
-                })
-            remaining_messages.append({"role": "user", "content": user_message})
+        try:
+            if self._kv_cache is not None:
+                remaining_messages = list(history)
+                if dynamic_context:
+                    remaining_messages.append({
+                        "role": "user",
+                        "content": f"[Context]\n{dynamic_context}",
+                    })
+                    remaining_messages.append({
+                        "role": "assistant",
+                        "content": "Understood, I have the context.",
+                    })
+                remaining_messages.append({"role": "user", "content": user_message})
 
-            response = self._generate_with_kv_cache(
-                system_prompt_text=system_prompt,
-                remaining_messages=remaining_messages,
-                max_tokens=max_tokens,
+                response = self._generate_with_kv_cache(
+                    system_prompt_text=system_prompt,
+                    remaining_messages=remaining_messages,
+                    max_tokens=max_tokens,
+                )
+            else:
+                messages = [{"role": "system", "content": system_prompt}]
+                messages.extend(history)
+                if dynamic_context:
+                    messages.append({
+                        "role": "user",
+                        "content": f"[Context]\n{dynamic_context}",
+                    })
+                    messages.append({
+                        "role": "assistant",
+                        "content": "Understood, I have the context.",
+                    })
+                messages.append({"role": "user", "content": user_message})
+                response = self._generate(messages)
+
+            logger.info(f"[LLM] Generated response: {len(response)} chars")
+            return response
+
+        except Exception as exc:
+            log_error(
+                "llm_generation_error",
+                f"LLM generate_response failed: {exc}",
+                severity="CRITICAL",
+                error_detail={"exception": str(exc), "user_message_len": len(user_message)},
+                source_module="llm_engine",
+                source_function="generate_response",
             )
-        else:
-            # KV cache not available — standard full-sequence generation
-            messages = [{"role": "system", "content": system_prompt}]
-            messages.extend(history)
-            if dynamic_context:
-                messages.append({
-                    "role": "user",
-                    "content": f"[Context]\n{dynamic_context}",
-                })
-                messages.append({
-                    "role": "assistant",
-                    "content": "Understood, I have the context.",
-                })
-            messages.append({"role": "user", "content": user_message})
-            response = self._generate(messages)
+            raise
 
-        logger.info(f"[LLM] Generated response: {len(response)} chars")
-        return response
     
     def _sentence_stream(self, raw_token_gen):
         """
@@ -1424,6 +1431,14 @@ class LLMRequestQueue:
             if self._queued >= self._max_queue_size:
                 self._total_rejected += 1
                 logger.warning(f"[LLMQueue] Queue full ({self._queued} waiting) — rejecting request")
+                log_error(
+                    "llm_queue_full",
+                    f"LLM queue full — {self._queued} requests already waiting (max={self._max_queue_size})",
+                    severity="WARNING",
+                    error_detail={"queued": self._queued, "max_queue_size": self._max_queue_size},
+                    source_module="llm_engine",
+                    source_function="LLMRequestQueue.acquire",
+                )
                 raise HTTPException(status_code=503, detail="The LLM is currently at capacity. Please retry in a few seconds.")
             self._queued += 1
 
@@ -1436,6 +1451,14 @@ class LLMRequestQueue:
                     self._queued -= 1
                     self._total_rejected += 1
                 logger.warning(f"[LLMQueue] Request timed out after {self._timeout_sec}s waiting")
+                log_error(
+                    "llm_request_timeout",
+                    f"LLM request waited {self._timeout_sec}s in queue without being served",
+                    severity="WARNING",
+                    error_detail={"timeout_sec": self._timeout_sec, "in_flight": self._in_flight},
+                    source_module="llm_engine",
+                    source_function="LLMRequestQueue.acquire",
+                )
                 raise HTTPException(status_code=503, detail=f"LLM did not respond within {self._timeout_sec}s. Please retry.")
 
             with self._lock:

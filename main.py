@@ -37,6 +37,104 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Global Exception Handlers ─────────────────────────────────────────────────
+
+from fastapi import Request, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from error_logger import log_error as _log_error
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Log 422 Pydantic/FastAPI validation errors to error_logs."""
+    _log_error(
+        "validation_error",
+        f"Request validation failed: {exc.errors()}",
+        severity="WARNING",
+        endpoint=str(request.url),
+        http_method=request.method,
+        http_status=422,
+        error_detail={"errors": exc.errors(), "body": str(exc.body)[:500] if exc.body else None},
+        source_module="main",
+        source_function="validation_exception_handler",
+    )
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors()},
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """
+    Log ALL HTTPExceptions (4xx/5xx) to error_logs.
+
+    FastAPI's built-in HTTPException handler runs before @app.exception_handler(Exception),
+    so without this explicit handler, 404s and other HTTP errors are never captured.
+
+    Only log as an actual error for 4xx/5xx that indicate a real problem:
+      - 404: resource not found
+      - 5xx: server errors
+    Skip 1xx/2xx/3xx (they are not errors).
+    """
+    status = exc.status_code
+
+    # Determine severity and error_type from status code
+    if status == 404:
+        error_type = "resource_not_found"
+        severity = "WARNING"
+    elif status == 503:
+        error_type = "service_unavailable"
+        severity = "WARNING"
+    elif 400 <= status < 500:
+        error_type = "client_error"
+        severity = "WARNING"
+    elif status >= 500:
+        error_type = "server_error"
+        severity = "ERROR"
+    else:
+        # 1xx/2xx/3xx — not errors, skip logging
+        return JSONResponse(status_code=status, content={"detail": exc.detail})
+
+    _log_error(
+        error_type,
+        f"HTTP {status}: {exc.detail}",
+        severity=severity,
+        endpoint=str(request.url),
+        http_method=request.method,
+        http_status=status,
+        error_detail={"detail": str(exc.detail)},
+        source_module="main",
+        source_function="http_exception_handler",
+    )
+    return JSONResponse(
+        status_code=status,
+        content={"detail": exc.detail},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Log unhandled 500 errors to error_logs."""
+    _log_error(
+        "server_error",
+        f"Unhandled server error: {type(exc).__name__}: {exc}",
+        severity="CRITICAL",
+        endpoint=str(request.url),
+        http_method=request.method,
+        http_status=500,
+        error_detail={"exception_type": type(exc).__name__, "exception": str(exc)},
+        source_module="main",
+        source_function="unhandled_exception_handler",
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
+
+
+
 # ── Register Routers ─────────────────────────────────────────────────────────
 from tool_registry import tool_router, image_router
 from orchestrator import orchestrator_router, subflow_router

@@ -6,3 +6,4 @@ customer_master_data/
 .claude
 .vscode
 __pycache__
+logs/

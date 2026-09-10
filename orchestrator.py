@@ -18,12 +18,13 @@ import os
 import re
 import time
 from datetime import date
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 import asyncio
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from config import cfg
+from error_logger import log_error
 from logger import get_logger
 from node_manager import node_store
 from tool_registry import (
@@ -387,7 +388,7 @@ async def extract_and_execute_tool(
     context: str = "",
 ) -> Dict[str, str]:
     """
-    Smart tool execution: before calling the external API, find which variables
+    Smart tool executifon: before calling the external API, find which variables
     the tool needs (from its params/endpoint), check which are missing from the
     session, and use the LLM to extract them from the user's latest message.
     Then execute the tool with the now-populated session variables.
@@ -422,8 +423,19 @@ async def extract_and_execute_tool(
 
     still_missing = [v for v in required_vars if not session.variables.get(v)]
     if still_missing:
-        logger.info(f"[Orcestrator] Tool {tool_id} still missing after extraction: {still_missing}"
-                    f"(will ateempt tool call anyway  - API may handle defaults)")
+        logger.info(f"[Orchestrator] Tool {tool_id} still missing after extraction: {still_missing}"
+                    f" (will attempt tool call anyway — API may handle defaults)")
+        log_error(
+            "variable_extraction_failure",
+            f"Tool '{tool_id}' still missing variables after LLM extraction: {still_missing}",
+            severity="WARNING",
+            session_id=session.session_id,
+            agent_id=session.agent_id,
+            tool_id=tool_id,
+            error_detail={"missing_vars": still_missing, "required_vars": required_vars},
+            source_module="orchestrator",
+            source_function="extract_and_execute_tool",
+        )
         
     new_vars = await dispatch_tool(tool_id, session.variables, session.session_id)
     return new_vars
@@ -452,6 +464,13 @@ async def evaluate_transitions(
     # If LLM not loaded, can't evaluate
     if not llm_engine.is_loaded:
         logger.warning("[Orchestrator] LLM not loaded, cannot evaluate transitions")
+        log_error(
+            "llm_transition_error",
+            "LLM not loaded — transition evaluation skipped",
+            severity="WARNING",
+            source_module="orchestrator",
+            source_function="evaluate_transitions",
+        )
         return None
 
     # Special case: single transition with catch-all condition → always transition
@@ -1245,6 +1264,13 @@ async def process_message(session_id: str, user_message: str) -> Dict:
     # 1. Get session
     session = memory_store.get_session(session_id)
     if not session:
+        log_error(
+            "session_not_found",
+            f"Session '{session_id}' not found in cache or DB",
+            severity="WARNING",
+            source_module="orchestrator",
+            source_function="chat_message",
+        )
         raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
 
     # Block messages after session ended
@@ -1261,7 +1287,17 @@ async def process_message(session_id: str, user_message: str) -> Dict:
 
     agent = agent_store.get(session.agent_id)
     if not agent:
+        log_error(
+            "agent_not_found",
+            f"Agent '{session.agent_id}' not found for session '{session_id}'",
+            severity="ERROR",
+            session_id=session_id,
+            agent_id=session.agent_id,
+            source_module="orchestrator",
+            source_function="chat_message",
+        )
         raise HTTPException(status_code=404, detail=f"Agent not found: {session.agent_id}")
+
 
     # ── SINGLE PROMPT MODE — skip all node/transition logic ──────────────
     if agent.get("mode") == "single_prompt":
@@ -1546,6 +1582,14 @@ async def start_chat(req: StartChatRequest):
     """
     agent = agent_store.get(req.agent_id)
     if not agent:
+        log_error(
+            "agent_not_found",
+            f"Agent '{req.agent_id}' not found — cannot start chat",
+            severity="ERROR",
+            agent_id=req.agent_id,
+            source_module="orchestrator",
+            source_function="start_chat",
+        )
         raise HTTPException(status_code=404, detail=f"Agent not found: {req.agent_id}")
 
     agent_mode = agent.get("mode", "flow")

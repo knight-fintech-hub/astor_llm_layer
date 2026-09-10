@@ -156,6 +156,17 @@ def get_cursor():
         except Exception as e:
             conn.rollback()
             logger.error(f"[DB] Query failed: {e}")
+            # Console-only (db_ prefix prevents DB write recursion in log_error)
+            try:
+                from error_logger import log_error
+                log_error(
+                    "db_query_error",
+                    f"SQL query failed: {e}",
+                    source_module="database",
+                    source_function="get_cursor",
+                )
+            except Exception:
+                pass
             raise
         finally:
             cursor.close()
@@ -200,10 +211,29 @@ def init_db() -> bool:
         with get_cursor() as cur:
             cur.execute("SELECT 1")
         logger.info("[DB] PostgreSQL connection pool verified")
-        return True
     except Exception as e:
         logger.error(f"[DB] Init failed: {e}")
+        # Log DB connection error to console only (DB not yet available)
+        try:
+            from error_logger import log_error
+            log_error(
+                "db_connection_error",
+                f"PostgreSQL pool init failed: {e}",
+                source_module="database",
+                source_function="init_db",
+            )
+        except Exception:
+            pass
         return False
+
+    # Create error_logs table now that the DB is confirmed reachable
+    try:
+        from error_logger import init_error_logs_table
+        init_error_logs_table()
+    except Exception as e:
+        logger.warning(f"[DB] Could not initialise error_logs table: {e}")
+
+    return True
 
 
 def close_pool():

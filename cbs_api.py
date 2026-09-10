@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from logger import get_logger
+from error_logger import log_error
 
 logger = get_logger(__name__)
 
@@ -96,6 +97,14 @@ def list_customers():
 def get_summary(mobile: str):
     summary = cbs_data.get_summary(mobile)
     if not summary:
+        log_error(
+            "cbs_customer_not_found",
+            f"CBS customer lookup failed — no record for mobile '{mobile[-4:].rjust(len(mobile), '*')}'",
+            severity="WARNING",
+            error_detail={"mobile_last4": mobile[-4:] if len(mobile) >= 4 else mobile},
+            source_module="cbs_api",
+            source_function="get_summary",
+        )
         raise HTTPException(status_code=404, detail=f"Customer not found: {mobile}")
     return summary
 
