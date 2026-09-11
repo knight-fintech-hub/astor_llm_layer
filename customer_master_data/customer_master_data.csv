@@ -1,0 +1,111 @@
+customer_id,mobile,name,dob,gender,city,occupation,annual_income,risk_profile,preferred_language,kyc_status
+CUST1001,9579962899,Aarav Deshmukh,1968-12-04,Male,Jaipur,Salaried - Banking,2777000,Moderate,Hindi,VERIFIED
+CUST1002,9746412698,Manish Joshi,1961-09-07,Male,Jaipur,Teacher/Academic,1225000,Moderate,Telugu,VERIFIED
+CUST1003,8266944853,Vikram Mehta,1973-06-04,Male,Delhi,Teacher/Academic,706000,Moderate,Kannada,PENDING
+CUST1004,9234031079,Diya Rao,1984-02-18,Female,Hyderabad,Retired,2894000,Moderate,Tamil,REJECTED
+CUST1005,8185675989,Aditya Joshi,1974-02-13,Male,Hyderabad,Freelancer,2966000,Moderate,Marathi,VERIFIED
+CUST1006,9833953727,Pooja Deshmukh,2001-02-20,Female,Bangalore,Consultant,3358000,Low,Marathi,VERIFIED
+CUST1007,7835098964,Riya Agarwal,1980-01-08,Female,Mumbai,Doctor/Healthcare,1983000,Moderate,English,VERIFIED
+CUST1008,8790256949,Pooja Chowdhury,1989-03-09,Female,Bangalore,Self-Employed,3425000,High,Telugu,REJECTED
+CUST1009,8335493879,Anjali Reddy,1968-09-16,Female,Delhi,Salaried - IT,760000,Low,Marathi,REJECTED
+CUST1010,8509760593,Kiran Pandey,1998-08-17,Female,Hyderabad,Consultant,348000,High,English,REJECTED
+CUST1011,8566825647,Shreya Gupta,1970-08-01,Female,Hyderabad,Consultant,3496000,Low,English,REJECTED
+CUST1012,7264109928,Swati Mishra,1983-03-18,Female,Jaipur,Salaried - IT,2812000,Moderate,Gujarati,VERIFIED
+CUST1013,7162196687,Sachin Kulkarni,1975-10-03,Male,Delhi,Freelancer,590000,High,Marathi,VERIFIED
+CUST1014,8666585417,Ritu Singh,1998-07-07,Female,Jaipur,Self-Employed,3290000,Moderate,Bengali,REJECTED
+CUST1015,8229927278,Sunita Das,1975-04-03,Female,Chennai,Salaried - IT,2768000,High,Tamil,PENDING
+CUST1016,9777641654,Aarav Pandey,1963-04-03,Male,Mumbai,Doctor/Healthcare,597000,High,Tamil,VERIFIED
+CUST1017,7876693907,Pooja Agarwal,1996-10-16,Female,Pune,Freelancer,2007000,Low,English,VERIFIED
+CUST1018,8601463925,Tanvi Nair,1963-11-21,Female,Delhi,Salaried - IT,1989000,High,Kannada,VERIFIED
+CUST1019,9581695144,Manish Kumar,1968-07-06,Male,Hyderabad,Freelancer,1348000,Low,Gujarati,PENDING
+CUST1020,7200140150,Aditya Agarwal,1975-03-14,Male,Ahmedabad,Freelancer,1197000,Moderate,Hindi,VERIFIED
+CUST1021,8941889402,Ananya Reddy,1989-05-14,Female,Jaipur,Retired,3313000,Moderate,Marathi,VERIFIED
+CUST1022,9889991786,Pooja Verma,1994-01-24,Female,Chennai,Salaried - IT,510000,High,Gujarati,PENDING
+CUST1023,7299528046,Aditya Das,1964-10-03,Male,Pune,Teacher/Academic,803000,High,Tamil,PENDING
+CUST1024,8805849069,Vijay Pandey,1997-10-17,Male,Chennai,Business Owner,1157000,High,Kannada,VERIFIED
+CUST1025,9793101203,Vishwa Patel,1979-08-11,Female,Delhi,Salaried - IT,2222000,High,English,VERIFIED
+CUST1026,7474745391,Sanjay Deshmukh,1964-04-12,Male,Hyderabad,Salaried - Govt,2138000,High,Telugu,PENDING
+CUST1027,9211225167,Deepak Kulkarni,1968-05-04,Male,Delhi,Consultant,952000,Moderate,Telugu,PENDING
+CUST1028,9781007827,Rohan Kumar,1976-09-16,Male,Hyderabad,Salaried - IT,687000,High,Bengali,VERIFIED
+CUST1029,7784095286,Aarav Mehta,1976-03-24,Male,Ahmedabad,Consultant,3260000,Moderate,Hindi,VERIFIED
+CUST1030,7996139587,Devansh Agarwal,1983-10-18,Male,Bangalore,Teacher/Academic,835000,Low,Telugu,VERIFIED
+CUST1031,9367930522,Sachin Kumar,2002-02-12,Male,Jaipur,Teacher/Academic,2903000,High,Marathi,VERIFIED
+CUST1032,7292587053,Karan Nair,1981-07-26,Male,Pune,Business Owner,968000,High,English,VERIFIED
+CUST1033,7976803197,Rajesh Joshi,1989-06-10,Male,Pune,Self-Employed,399000,High,Tamil,VERIFIED
+CUST1034,8477040293,Riya Pandey,2001-09-13,Female,Jaipur,Doctor/Healthcare,416000,Low,Telugu,VERIFIED
+CUST1035,9566609292,Diya Gupta,1982-12-26,Female,Chennai,Teacher/Academic,2843000,High,English,VERIFIED
+CUST1036,9568213206,Pranav Verma,1960-09-26,Male,Jaipur,Retired,3318000,High,Tamil,VERIFIED
+CUST1037,9437064362,Isha Mehta,2002-02-24,Female,Hyderabad,Consultant,1597000,High,Bengali,VERIFIED
+CUST1038,7305986742,Sneha Agarwal,1986-11-13,Female,Bangalore,Student,2687000,Moderate,Bengali,PENDING
+CUST1039,7561588891,Rahul Kulkarni,1997-10-21,Male,Chennai,Freelancer,2153000,Moderate,Tamil,PENDING
+CUST1040,8653462387,Neha Pandey,2002-11-20,Female,Chennai,Salaried - Banking,3451000,Low,Telugu,VERIFIED
+CUST1041,7362897685,Devansh Sharma,1990-10-28,Male,Delhi,Freelancer,2038000,High,Tamil,REJECTED
+CUST1042,7258453530,Deepika Reddy,2001-12-01,Female,Delhi,Teacher/Academic,1218000,Low,Gujarati,VERIFIED
+CUST1043,7960514532,Anurag Rao,1989-11-17,Male,Jaipur,Student,1631000,Moderate,Bengali,PENDING
+CUST1044,8378304816,Neha Chowdhury,1975-11-09,Female,Jaipur,Freelancer,2929000,Low,Telugu,VERIFIED
+CUST1045,8460613559,Rahul Joshi,1980-09-03,Male,Bangalore,Salaried - Govt,1270000,Moderate,Marathi,REJECTED
+CUST1046,8455281193,Amit Nair,1994-08-14,Male,Mumbai,Self-Employed,2062000,Moderate,Hindi,PENDING
+CUST1047,8420632904,Deepika Sharma,1984-07-18,Female,Jaipur,Student,1225000,Moderate,Tamil,VERIFIED
+CUST1048,8460916356,Deepika Sharma,2002-11-26,Female,Kolkata,Salaried - Govt,2260000,Low,Hindi,VERIFIED
+CUST1049,7595744944,Amit Nair,1971-01-09,Male,Kolkata,Doctor/Healthcare,1188000,Moderate,Kannada,VERIFIED
+CUST1050,8996478781,Riya Nair,1965-08-01,Female,Jaipur,Salaried - IT,1768000,Low,English,REJECTED
+CUST1051,7121882886,Aarav Joshi,1999-03-08,Male,Bangalore,Freelancer,3108000,Low,Tamil,VERIFIED
+CUST1052,9752027034,Tanvi Singh,1967-03-10,Female,Delhi,Student,408000,Moderate,Bengali,VERIFIED
+CUST1053,9991819506,Amit Bhatia,2000-04-04,Male,Hyderabad,Retired,2818000,Low,Hindi,VERIFIED
+CUST1054,9795294284,Tanvi Pandey,1981-01-28,Female,Kolkata,Freelancer,743000,Moderate,Kannada,REJECTED
+CUST1055,7887906713,Meera Nair,1993-11-09,Female,Lucknow,Consultant,2328000,Moderate,Bengali,REJECTED
+CUST1056,7399496932,Shreya Joshi,1988-04-25,Female,Ahmedabad,Student,2860000,High,Bengali,VERIFIED
+CUST1057,7623502768,Rajesh Mehta,1973-06-26,Male,Hyderabad,Doctor/Healthcare,1473000,High,Telugu,PENDING
+CUST1058,7359154093,Sanjay Kumar,1986-08-18,Male,Pune,Freelancer,3009000,High,Gujarati,VERIFIED
+CUST1059,7534222410,Amit Kulkarni,1975-05-22,Male,Lucknow,Doctor/Healthcare,2285000,High,Kannada,VERIFIED
+CUST1060,8429233938,Tanvi Rao,1976-04-04,Female,Pune,Doctor/Healthcare,801000,High,Marathi,VERIFIED
+CUST1061,9733064126,Rajesh Deshmukh,1993-10-10,Male,Delhi,Self-Employed,1543000,Low,Kannada,VERIFIED
+CUST1062,7394539559,Ananya Agarwal,1962-01-18,Female,Hyderabad,Salaried - Govt,2975000,Moderate,English,VERIFIED
+CUST1063,8465830224,Deepika Chowdhury,1971-01-09,Female,Ahmedabad,Salaried - Banking,574000,Moderate,Gujarati,VERIFIED
+CUST1064,9426240912,Devansh Patel,1965-04-04,Male,Jaipur,Teacher/Academic,2843000,High,Tamil,PENDING
+CUST1065,8731924060,Sunita Rao,1987-05-19,Female,Lucknow,Salaried - IT,2857000,High,English,VERIFIED
+CUST1066,7357553283,Pranav Pandey,1971-09-03,Male,Bangalore,Salaried - IT,2013000,Moderate,Gujarati,VERIFIED
+CUST1067,9403566549,Nikhil Kulkarni,1989-02-22,Male,Pune,Business Owner,2922000,High,Tamil,VERIFIED
+CUST1068,9259976153,Deepak Joshi,1977-03-03,Male,Mumbai,Salaried - Govt,1590000,High,Telugu,VERIFIED
+CUST1069,9532190240,Yash Kulkarni,1977-09-18,Male,Ahmedabad,Freelancer,637000,High,Hindi,VERIFIED
+CUST1070,7198061508,Kiran Deshmukh,1974-11-27,Female,Lucknow,Student,387000,High,Telugu,PENDING
+CUST1071,9799553000,Karan Chowdhury,1988-05-06,Male,Lucknow,Teacher/Academic,2962000,Moderate,English,VERIFIED
+CUST1072,8819550390,Anita Mehta,1966-03-11,Female,Kolkata,Freelancer,1509000,High,Bengali,PENDING
+CUST1073,8371011209,Yash Pandey,1980-02-25,Male,Kolkata,Consultant,305000,High,Gujarati,VERIFIED
+CUST1074,8768548036,Manish Das,1991-11-15,Male,Mumbai,Self-Employed,1420000,High,Marathi,VERIFIED
+CUST1075,7776481273,Deepika Gupta,1998-04-23,Female,Bangalore,Business Owner,2610000,Low,Bengali,VERIFIED
+CUST1076,7795472989,Anurag Rao,1969-08-23,Male,Hyderabad,Consultant,3259000,Moderate,Bengali,VERIFIED
+CUST1077,9255308137,Priya Rao,1984-04-20,Female,Jaipur,Salaried - Govt,593000,Moderate,Bengali,VERIFIED
+CUST1078,9420571912,Ananya Kulkarni,1997-10-22,Female,Ahmedabad,Salaried - Govt,2173000,High,Gujarati,VERIFIED
+CUST1079,8588922566,Ritu Agarwal,1980-04-23,Female,Pune,Student,1906000,Low,Bengali,VERIFIED
+CUST1080,8812630462,Deepika Reddy,2001-03-16,Female,Mumbai,Salaried - Govt,2407000,High,Kannada,VERIFIED
+CUST1081,8116479367,Kavya Das,1969-07-28,Female,Bangalore,Salaried - Banking,2269000,Moderate,Kannada,PENDING
+CUST1082,9672972606,Isha Mehta,1984-06-21,Female,Ahmedabad,Consultant,451000,High,English,VERIFIED
+CUST1083,8205702508,Priya Pandey,2000-12-28,Female,Delhi,Freelancer,998000,High,Telugu,VERIFIED
+CUST1084,8484897093,Rohan Verma,1983-07-05,Male,Pune,Consultant,2028000,High,Marathi,VERIFIED
+CUST1085,8765408947,Amit Mishra,2003-04-16,Male,Lucknow,Salaried - Govt,1274000,Moderate,Telugu,VERIFIED
+CUST1086,8827579156,Ananya Rao,1994-03-03,Female,Ahmedabad,Doctor/Healthcare,2764000,Moderate,Bengali,REJECTED
+CUST1087,7513061233,Sunita Kulkarni,1990-02-08,Female,Kolkata,Student,1806000,High,Telugu,REJECTED
+CUST1088,8108695134,Ananya Reddy,1996-11-25,Female,Mumbai,Student,3425000,Moderate,Telugu,VERIFIED
+CUST1089,9369108484,Priya Kumar,2003-12-25,Female,Bangalore,Retired,708000,High,Hindi,VERIFIED
+CUST1090,8886365321,Diya Bhatia,1968-02-10,Female,Chennai,Teacher/Academic,1037000,Low,Marathi,PENDING
+CUST1091,8991713199,Swati Das,1970-05-27,Female,Ahmedabad,Business Owner,3431000,Moderate,English,VERIFIED
+CUST1092,9877621779,Devansh Joshi,2003-07-28,Male,Jaipur,Doctor/Healthcare,679000,Moderate,Hindi,VERIFIED
+CUST1093,9904245095,Yash Shah,2003-05-19,Male,Kolkata,Retired,1858000,Low,Tamil,VERIFIED
+CUST1094,8755070784,Vijay Agarwal,1974-11-03,Male,Ahmedabad,Business Owner,3023000,Moderate,English,VERIFIED
+CUST1095,8224683426,Aditya Kulkarni,1966-04-18,Male,Bangalore,Teacher/Academic,2203000,Moderate,Bengali,PENDING
+CUST1096,8761051541,Vikram Gupta,1986-05-02,Male,Chennai,Self-Employed,2160000,Moderate,Tamil,VERIFIED
+CUST1097,9485123119,Sachin Agarwal,1963-07-09,Male,Pune,Salaried - Banking,2207000,Low,Tamil,REJECTED
+CUST1098,7235209746,Aditya Mehta,1996-04-03,Male,Jaipur,Self-Employed,2759000,Low,Tamil,VERIFIED
+CUST1099,8255357543,Vijay Sharma,1968-09-09,Male,Bangalore,Salaried - Banking,3073000,Low,Marathi,VERIFIED
+CUST1100,8116944820,Priya Bhatia,1971-05-02,Female,Bangalore,Teacher/Academic,2507000,Low,English,VERIFIED
+CUST1101,9217095860,Tanvi Das,1988-09-08,Female,Lucknow,Salaried - IT,3350000,High,Telugu,VERIFIED
+CUST1102,8557707822,Aditya Chowdhury,2003-02-16,Male,Ahmedabad,Salaried - Banking,639000,Moderate,Marathi,VERIFIED
+CUST1103,9728530553,Pranav Mishra,1995-12-11,Male,Kolkata,Student,2525000,Moderate,Gujarati,PENDING
+CUST1104,9798916450,Kavya Gupta,1995-12-28,Female,Pune,Teacher/Academic,2194000,Low,Bengali,VERIFIED
+CUST1105,9202097652,Vishwa Nair,1980-07-11,Female,Hyderabad,Doctor/Healthcare,940000,High,Gujarati,VERIFIED
+CUST1106,8203685274,Amit Pandey,1983-03-18,Male,Mumbai,Student,2655000,High,Kannada,REJECTED
+CUST1107,9905611592,Vikram Shah,1987-12-02,Male,Hyderabad,Student,1611000,Moderate,English,PENDING
+CUST1108,7216198613,Devansh Chowdhury,1982-09-12,Male,Delhi,Business Owner,2708000,Low,Bengali,PENDING
+CUST1109,7293720294,Vijay Deshmukh,1977-12-25,Male,Hyderabad,Doctor/Healthcare,1772000,Low,Marathi,VERIFIED
+CUST1110,9779863274,Isha Patel,1961-02-24,Female,Jaipur,Self-Employed,1878000,Moderate,Gujarati,VERIFIED
