@@ -79,5 +79,9 @@ class Config:
     # Data directory (fallback for CBS CSV data)
     DATA_DIR: str = os.path.join(os.path.dirname(__file__), "data")
 
+    # RAG / Knowledge Base
+    RAG_API_URL: str = os.getenv("RAG_API_URL", "http://localhost:8200")
+    RAG_SCORE_THRESHOLD: float = float(os.getenv("RAG_SCORE_THRESHOLD", "0.6"))
+
 
 cfg = Config()

@@ -139,7 +139,7 @@ def build_consolidated_json(agent_id: str, agent: Dict) -> Dict:
             "start_node_id": start_node_id,
             "start_speaker": "agent",
             "global_prompt": agent.get("system_prompt", ""),
-            "knowledge_base_ids": [],
+            "knowledge_base_ids": agent.get("doc_ids", []),
             "nodes": nodes_out,
             "global_node_ids": global_node_ids,  # extended: list of global node IDs for fast lookup
         },
@@ -171,6 +171,7 @@ class AgentCreate(BaseModel):
     language: str = Field("english")
     personality: Optional[str] = None
     swap_rules: Dict[str, Optional[str]] = Field(default_factory=dict)
+    doc_ids: List[str] = Field(default_factory=list)
 
 
 class AgentUpdate(BaseModel):
@@ -184,6 +185,7 @@ class AgentUpdate(BaseModel):
     language: Optional[str] = None
     personality: Optional[str] = None
     swap_rules: Optional[Dict[str, Optional[str]]] = None
+    doc_ids: Optional[List[str]] = None
 
 
 class NodeCreate(BaseModel):
@@ -227,8 +229,8 @@ class AgentStore:
         agent_id = f"agent_{uuid.uuid4().hex[:8]}"
         execute_write(
             """INSERT INTO agents (agent_id, name, mode, system_prompt, start_node,
-               nodes, global_nodes, tools, language, personality, swap_rules)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+               nodes, global_nodes, tools, language, personality, swap_rules, doc_ids)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (
                 agent_id,
                 kwargs["name"],
@@ -241,6 +243,7 @@ class AgentStore:
                 kwargs.get("language", "english"),
                 kwargs.get("personality"),
                 json.dumps(kwargs.get("swap_rules", {})),
+                json.dumps(kwargs.get("doc_ids", [])),
             ),
         )
         logger.info(f"[AgentStore] Created: {agent_id} ({kwargs['name']})")
@@ -277,7 +280,7 @@ class AgentStore:
                 updates.append(f"{key} = %s")
                 values.append(kwargs[key])
 
-        for key in ("nodes", "global_nodes", "tools", "swap_rules"):
+        for key in ("nodes", "global_nodes", "tools", "swap_rules", "doc_ids"):
             if kwargs.get(key) is not None:
                 updates.append(f"{key} = %s")
                 values.append(json.dumps(kwargs[key]))
@@ -337,6 +340,7 @@ class AgentStore:
             "language": row.get("language", "english"),
             "personality": row.get("personality"),
             "swap_rules": row.get("swap_rules", {}),
+            "doc_ids": row.get("doc_ids", []),
             "agent_config_json": raw_config,  # consolidated agent config JSON
             "created_at": str(row.get("created_at", "")),
             "updated_at": str(row.get("updated_at", "")),
@@ -383,7 +387,7 @@ def create_agent(req: AgentCreate):
         name=req.name, mode=req.mode, system_prompt=req.system_prompt,
         start_node=req.start_node, nodes=req.nodes, global_nodes=req.global_nodes,
         tools=req.tools, language=req.language, personality=req.personality,
-        swap_rules=req.swap_rules,
+        swap_rules=req.swap_rules, doc_ids=req.doc_ids,
     )
     return agent
 
@@ -408,7 +412,7 @@ def update_agent(agent_id: str, req: AgentUpdate):
         agent_id, name=req.name, mode=req.mode, system_prompt=req.system_prompt,
         start_node=req.start_node, nodes=req.nodes, global_nodes=req.global_nodes,
         tools=req.tools, language=req.language, personality=req.personality,
-        swap_rules=req.swap_rules,
+        swap_rules=req.swap_rules, doc_ids=req.doc_ids,
     )
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")

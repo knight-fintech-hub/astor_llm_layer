@@ -7,11 +7,10 @@ gradio_app.py — Knight Flow Generic UI
   Tab 3: Chat          — Dynamic conversation with flow-based agents
 """
 
-import json\
-    
+import json
 import httpx
 import gradio as gr
-26
+from config import cfg
 API_BASE = "http://192.168.0.155:1230"
 
 
@@ -40,6 +39,51 @@ def api(method, endpoint, json_data=None):
         return None, "Timeout"
     except Exception as e:
         return None, str(e)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# KNOWLEDGE BASE HELPER
+# ══════════════════════════════════════════════════════════════════════════════
+
+def upload_kb_files(files):
+    """Upload documents to /api/knowledge-base/upload and return a status string."""
+    if not files:
+        return "⚠️ No files selected."
+    import httpx
+    url = f"{cfg.RAG_API_URL}/ingest"
+    file_tuples = []
+    opened = []
+    try:
+        for f in files:
+            fh = open(f, "rb")
+            opened.append(fh)
+            import os
+            fname = os.path.basename(f)
+            file_tuples.append(("files", (fname, fh, "application/octet-stream")))
+        resp = httpx.post(url, files=file_tuples, timeout=120)
+        if resp.status_code == 200:
+            data = resp.json()
+            lines = [
+                f"✅ Ingested **{data['success']}/{data['total']}** file(s) "
+                f"(failed: {data['failed']})  ",
+                f"RAG endpoint: `{data.get('rag_ingest_url', '')}` ",
+                "",
+                "| File | Status | Detail |",
+                "|------|--------|--------|",
+            ]
+            for r in data.get("files", []):
+                icon = "✅" if r["status"] == "success" else ""
+                detail = str(r.get("detail", ""))[:120].replace("|", "/")
+                lines.append(f"| `{r['filename']}` | {icon} {r['status']} | {detail} |")
+            return "\n".join(lines)
+        return f" Error {resp.status_code}: {resp.text[:400]}"
+    except httpx.ConnectError:
+        return " Cannot connect to Knight backend. Is `main.py` running?"
+    except Exception as e:
+        return f" {e}"
+    finally:
+        for fh in opened:
+            fh.close()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -217,7 +261,7 @@ def add_node_to_draft(n_name, n_type, n_prompt, n_static, n_variables, n_tools,
 
     data, err = api("POST", "/api/nodes", payload)
     if err:
-        return draft_state, f"❌ Error creating node: {err}", render_draft_nodes(draft_state), get_draft_node_choices(draft_state)
+        return draft_state, f" Error creating node: {err}", render_draft_nodes(draft_state), get_draft_node_choices(draft_state)
 
     # Attach draft metadata
     data["_is_start"] = False
@@ -250,8 +294,19 @@ def set_start_node_in_draft(start_node_id, draft_state):
     return new_draft, render_draft_nodes(new_draft)
 
 
+def get_kb_docs_choices():
+    """Get list of documents from the knowledge base."""
+    data, err = api("GET", "/api/knowledge-base/documents")
+    choices = []
+    if data and "collections" in data:
+        for c in data["collections"]:
+            for d in c.get("documents", []):
+                choices.append((f"{d.get('filename', 'Unknown')} ({d.get('doc_id', 'Unknown')})", d.get("doc_id")))
+    return gr.update(choices=choices)
+
+
 def create_agent_with_nodes(a_name, a_mode, a_system_prompt, a_lang, a_personality,
-                             a_tools_str, draft_state, start_node_dd):
+                             a_tools_str, a_docs, draft_state, start_node_dd):
     """Create the agent using the draft node list."""
     if not a_name or not a_system_prompt:
         return "⚠️ Agent Name and System Prompt are required."
@@ -281,6 +336,7 @@ def create_agent_with_nodes(a_name, a_mode, a_system_prompt, a_lang, a_personali
             "language": a_lang or "english",
             "personality": a_personality.strip() if a_personality else None,
             "swap_rules": {},
+            "doc_ids": a_docs if a_docs else [],
         }
     else:
         # single_prompt mode
@@ -295,11 +351,12 @@ def create_agent_with_nodes(a_name, a_mode, a_system_prompt, a_lang, a_personali
             "language": a_lang or "english",
             "personality": a_personality.strip() if a_personality else None,
             "swap_rules": {},
+            "doc_ids": a_docs if a_docs else [],
         }
 
     data, err = api("POST", "/api/agents", payload)
     if err:
-        return f"❌ Error: {err}", ""
+        return f" Error: {err}", ""
 
     config_json = data.get("agent_config_json", {})
     import json as _json
@@ -361,11 +418,11 @@ def get_update_agent_choices():
 def load_agent_for_update(agent_id):
     """Load agent data into form fields for editing."""
     if not agent_id:
-        return ("", "flow", "", "english", "", "", "", "_(Select an agent to load its details)_")
+        return ("", "flow", "", "english", "", "", "", [], "_(Select an agent to load its details)_")
 
     data, err = api("GET", f"/api/agents/{agent_id}")
     if err:
-        return ("", "flow", "", "english", "", "", "", f"❌ Error loading agent: {err}")
+        return ("", "flow", "", "english", "", "", "", [], f" Error loading agent: {err}")
 
     # Format nodes list for display
     nodes_display = ", ".join(data.get("nodes", []))
@@ -382,12 +439,13 @@ def load_agent_for_update(agent_id):
         data.get("personality", "") or "",
         tools_display,
         data.get("start_node", "") or "",
+        data.get("doc_ids", []),
         status,
     )
 
 
 def save_agent_update(agent_id, u_name, u_mode, u_system_prompt, u_lang,
-                      u_personality, u_tools_str, u_start_node):
+                      u_personality, u_tools_str, u_start_node, u_docs):
     """
     Save partial update — only send fields that the user actually changed.
     Compares current form values with what's stored in the DB and sends only diffs.
@@ -398,7 +456,7 @@ def save_agent_update(agent_id, u_name, u_mode, u_system_prompt, u_lang,
     # Fetch current agent data from DB for comparison
     current, err = api("GET", f"/api/agents/{agent_id}")
     if err:
-        return f"❌ Error fetching agent: {err}"
+        return f" Error fetching agent: {err}"
 
     # Build payload with ONLY changed fields
     payload = {}
@@ -430,13 +488,18 @@ def save_agent_update(agent_id, u_name, u_mode, u_system_prompt, u_lang,
     if u_start_node.strip() != current_start:
         payload["start_node"] = u_start_node.strip() if u_start_node.strip() else None
 
+    # Docs comparison
+    current_docs = current.get("doc_ids", [])
+    if (u_docs or []) != current_docs:
+        payload["doc_ids"] = u_docs or []
+
     if not payload:
         return "ℹ️ No changes detected — nothing to update."
 
     # Send only the changed fields
     data, err = api("PUT", f"/api/agents/{agent_id}", payload)
     if err:
-        return f"❌ Error updating: {err}"
+        return f" Error updating: {err}"
 
     changed_fields = ", ".join(payload.keys())
     return f"✅ Updated **{data['name']}** — changed: {changed_fields}"
@@ -449,7 +512,7 @@ def load_agent_nodes_for_update(agent_id):
 
     data, err = api("GET", f"/api/agents/{agent_id}")
     if err:
-        return gr.update(choices=[]), f"❌ Error: {err}"
+        return gr.update(choices=[]), f" Error: {err}"
 
     all_node_ids = list(set(data.get("nodes", []) + data.get("global_nodes", [])))
     if not all_node_ids:
@@ -481,7 +544,7 @@ def load_node_for_update(node_id):
 
     data, err = api("GET", f"/api/nodes/{node_id}")
     if err:
-        return ("", "conversation", "", "", "", "", False, 3, "", f"❌ Error: {err}")
+        return ("", "conversation", "", "", "", "", False, 3, "", f" Error: {err}")
 
     variables_str = ", ".join(data.get("variables_needed", []))
     tools_str = ", ".join(data.get("tools", []))
@@ -521,7 +584,7 @@ def save_node_update(node_id, un_name, un_type, un_prompt, un_static,
     # Fetch current node from DB
     current, err = api("GET", f"/api/nodes/{node_id}")
     if err:
-        return f"❌ Error fetching node: {err}"
+        return f" Error fetching node: {err}"
 
     payload = {}
 
@@ -561,7 +624,7 @@ def save_node_update(node_id, un_name, un_type, un_prompt, un_static,
 
     data, err = api("PUT", f"/api/nodes/{node_id}", payload)
     if err:
-        return f"❌ Error updating node: {err}"
+        return f" Error updating node: {err}"
 
     changed_fields = ", ".join(payload.keys())
     return f"✅ Updated node **{data['name']}** — changed: {changed_fields}"
@@ -579,7 +642,7 @@ def _attach_node_to_agent(agent_id, node_id, is_global):
     """
     current, err = api("GET", f"/api/agents/{agent_id}")
     if err:
-        return None, f"❌ Error fetching agent: {err}"
+        return None, f" Error fetching agent: {err}"
 
     nodes = list(current.get("nodes", []))
     global_nodes = list(current.get("global_nodes", []))
@@ -596,7 +659,7 @@ def _attach_node_to_agent(agent_id, node_id, is_global):
     payload = {"nodes": nodes, "global_nodes": global_nodes}
     data, err = api("PUT", f"/api/agents/{agent_id}", payload)
     if err:
-        return None, f"❌ Error updating agent node list: {err}"
+        return None, f" Error updating agent node list: {err}"
     return data, None
 
 
@@ -630,7 +693,7 @@ def add_new_node_to_agent(
 
     node_data, err = api("POST", "/api/nodes", payload)
     if err:
-        return f"❌ Error creating node: {err}", gr.update()
+        return f" Error creating node: {err}", gr.update()
 
     new_node_id = node_data["node_id"]
     _, attach_err = _attach_node_to_agent(agent_id, new_node_id, an_global)
@@ -660,7 +723,7 @@ def add_existing_node_to_agent(agent_id, existing_node_id, as_global):
     # Validate node exists
     node_data, err = api("GET", f"/api/nodes/{nid}")
     if err:
-        return f"❌ Node `{nid}` not found: {err}", gr.update()
+        return f" Node `{nid}` not found: {err}", gr.update()
 
     _, attach_err = _attach_node_to_agent(agent_id, nid, as_global)
     if attach_err:
@@ -956,6 +1019,15 @@ with gr.Blocks(title="Knight Flow Generic") as app:
                         value="english"
                     )
                     a_personality = gr.Textbox(label="Personality", placeholder="professional, empathetic")
+                    with gr.Row():
+                        a_docs = gr.Dropdown(
+                            label="Knowledge Base Documents",
+                            multiselect=True,
+                            choices=[],
+                            info="Select documents to attach to this agent.",
+                            scale=4,
+                        )
+                        a_docs_refresh_btn = gr.Button("🔄 Refresh Docs", variant="secondary", scale=1, size="sm")
 
                 with gr.Column(scale=2):
                     a_prompt = gr.Textbox(
@@ -1110,6 +1182,14 @@ with gr.Blocks(title="Knight Flow Generic") as app:
                             label="Start Node ID",
                             placeholder="node_xxxxx"
                         )
+                        with gr.Row():
+                            u_docs = gr.Dropdown(
+                                label="Knowledge Base Documents",
+                                multiselect=True,
+                                choices=[],
+                                scale=4,
+                            )
+                            u_docs_refresh_btn = gr.Button("🔄 Refresh Docs", variant="secondary", scale=1, size="sm")
                     with gr.Column(scale=2):
                         u_system_prompt = gr.Textbox(
                             label="System Prompt",
@@ -1252,7 +1332,28 @@ with gr.Blocks(title="Knight Flow Generic") as app:
                 update_node_save_btn = gr.Button("💾 Save Changes (Node)", variant="primary")
                 update_node_save_status = gr.Textbox(label="Node Update Status", interactive=False)
 
-        # ── TAB 4: Chat ───────────────────────────────────────────────────────
+        # ── TAB 4: Knowledge Base ─────────────────────────────────────────────
+        with gr.Tab("📚 Knowledge Base"):
+            gr.Markdown("## 📚 Knowledge Base — Document Ingestion")
+            gr.Markdown(
+                "Upload one or more documents (PDF, DOCX, TXT, CSV, …) to the RAG "
+                "knowledge base.  "
+                "Files are forwarded to the RAG ingest service configured in `RAG_API_URL`."
+            )
+
+            with gr.Row():
+                with gr.Column(scale=2):
+                    kb_file_upload = gr.File(
+                        label="Select Documents",
+                        file_count="multiple",
+                        file_types=[".pdf", ".docx", ".doc", ".txt", ".csv", ".md", ".json"],
+                        height=200,
+                    )
+                    kb_upload_btn = gr.Button("⬆️ Upload to Knowledge Base", variant="primary", size="lg")
+
+            kb_status = gr.Markdown("_Upload files and click the button above._")
+
+        # ── TAB 5: Chat ───────────────────────────────────────────────────────
         with gr.Tab("💬 Chat"):
             gr.Markdown("### Chat with Dynamic Flow Agent")
             
@@ -1355,9 +1456,12 @@ with gr.Blocks(title="Knight Flow Generic") as app:
     # Tab 3 — Agent Builder: Create agent
     agent_refresh_btn.click(fn=refresh_agents, outputs=[agent_list, agent_select])
     agent_delete_btn.click(fn=delete_agent, inputs=[agent_select], outputs=[agent_delete_status])
+    # Tab 3 — Agent Builder: Refresh docs dropdown
+    a_docs_refresh_btn.click(fn=get_kb_docs_choices, outputs=[a_docs])
+
     agent_create_btn.click(
         fn=create_agent_with_nodes,
-        inputs=[a_name, a_mode, a_prompt, a_lang, a_personality, a_tools_str, draft_state, start_node_dd],
+        inputs=[a_name, a_mode, a_prompt, a_lang, a_personality, a_tools_str, a_docs, draft_state, start_node_dd],
         outputs=[agent_status, agent_config_json_display],
     )
 
@@ -1367,11 +1471,17 @@ with gr.Blocks(title="Knight Flow Generic") as app:
         outputs=[update_agent_dd],
     )
 
+    # Tab 3 — Agent Update: Refresh docs dropdown
+    u_docs_refresh_btn.click(fn=get_kb_docs_choices, outputs=[u_docs])
+
     # Tab 3 — Agent Update: Load agent into form
     update_agent_load_btn.click(
+        fn=get_kb_docs_choices,
+        outputs=[u_docs],
+    ).then(
         fn=load_agent_for_update,
         inputs=[update_agent_dd],
-        outputs=[u_name, u_mode, u_system_prompt, u_lang, u_personality, u_tools_str, u_start_node, update_agent_status],
+        outputs=[u_name, u_mode, u_system_prompt, u_lang, u_personality, u_tools_str, u_start_node, u_docs, update_agent_status],
     ).then(
         fn=load_agent_nodes_for_update,
         inputs=[update_agent_dd],
@@ -1381,7 +1491,7 @@ with gr.Blocks(title="Knight Flow Generic") as app:
     # Tab 3 — Agent Update: Save agent changes
     update_agent_save_btn.click(
         fn=save_agent_update,
-        inputs=[update_agent_dd, u_name, u_mode, u_system_prompt, u_lang, u_personality, u_tools_str, u_start_node],
+        inputs=[update_agent_dd, u_name, u_mode, u_system_prompt, u_lang, u_personality, u_tools_str, u_start_node, u_docs],
         outputs=[update_agent_save_status],
     )
 
@@ -1424,7 +1534,14 @@ with gr.Blocks(title="Knight Flow Generic") as app:
         outputs=[update_node_save_status],
     )
 
-    # Tab 4 — Chat
+    # Tab 4 — Knowledge Base
+    kb_upload_btn.click(
+        fn=upload_kb_files,
+        inputs=[kb_file_upload],
+        outputs=[kb_status],
+    )
+
+    # Tab 5 — Chat
     chat_refresh_btn.click(fn=refresh_chat_dropdowns, outputs=[chat_agent, chat_customer])
     
     # start_chat returns: chatbot, chat_status, session_state

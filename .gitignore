@@ -1,9 +1,11 @@
 .env
 temp/
 data/
-customer_master_data/
 .gradio
 .claude
 .vscode
 __pycache__
 logs/
+*.json
+rag_app.py
+*.csv

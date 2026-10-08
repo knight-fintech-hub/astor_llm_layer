@@ -801,13 +801,17 @@ async def fire_transition_tool(node: Optional[Dict], to_node: str, session: Sess
 
 # ── Node Execution ───────────────────────────────────────────────────────────
 
-def build_node_system_prompt(agent: Dict, node: Dict, session: Session, note: Optional[str] = None) -> str:
+def build_node_system_prompt(agent: Dict, node: Dict, session: Session, note: Optional[str] = None, has_rag_context: bool = False) -> str:
     """Build the STATIC system prompt for the current node.
 
     Variable-dependent content (session.variables dump, tool results) is
     intentionally excluded here so the returned string stays stable across
     turns and can be used as a KV-cache key.  Pass that content separately
     via build_session_context() + generate_response(dynamic_context=...).
+
+    has_rag_context: When True, the out-of-scope deflection rule is softened
+    so the LLM can answer from the retrieved knowledge-base chunks instead of
+    firing the canned "not an expert" response.
     """
     parts = []
 
@@ -819,12 +823,14 @@ def build_node_system_prompt(agent: Dict, node: Dict, session: Session, note: Op
 
     parts.append(ASYNC_TOOL_INSTRUCTIONS)
 
-    # Out-of-scope rule
-    parts.append(
-        "If the customer asks anything outside loan collection, EMI, payments, "
-        "or account queries, reply EXACTLY: "
-        "\"I am not an expert in this. Let me forward your query to another agent who can help you better.\""
-    )
+    # Out-of-scope rule — suppressed when RAG context is available so the LLM
+    # can answer from the knowledge base rather than deflecting.
+    if not has_rag_context:
+        parts.append(
+            "If the customer asks anything outside loan collection, EMI, payments, "
+            "or account queries, reply EXACTLY: "
+            "\"I am not an expert in this. Let me forward your query to another agent who can help you better.\""
+        )
 
     # Agent base prompt
     parts.append(f"\n{resolve_template(agent['system_prompt'], session.variables)}")
@@ -1245,6 +1251,71 @@ async def collect_background_results(session: Session) -> Optional[str]:
     return "\n\n".join(blocks)
 
 
+async def fetch_rag_context(query: str, doc_ids: List[str]) -> Optional[str]:
+    """Fetch relevant chunks from the RAG knowledge base if doc_ids are attached."""
+    import httpx as _httpx
+    # 1. Check if selected agent has doc_ids binded
+    if not doc_ids:
+        logger.info("[Orchestrator] No doc ids found for this agent. Generating directly.")
+        return None
+        
+    logger.info(f"[Orchestrator] Doc ids found: {doc_ids}. Using RAG first approach.")
+    url = f"{cfg.RAG_API_URL}/retrieve"
+    payload = {
+        "query": query,
+        "doc_ids": doc_ids,
+        "collection_name": "",
+        "top_n": 3
+    }
+    
+    try:
+        # 2. Call RAG retrieve API
+        async with _httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json=payload)
+            if resp.status_code == 200:
+                data = resp.json()
+                
+                # Save the response for chunk verification
+                import json
+                with open("rag_response.json", "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=4, ensure_ascii=False)
+                    
+                chunks = data.get("chunks", [])
+                
+                # 3. Match score with threshold
+                threshold = getattr(cfg, "RAG_SCORE_THRESHOLD", 0.6)
+                valid_chunks = []
+                
+                for i, c in enumerate(chunks, 1):
+                    score = c.get("rerank_score") or c.get("dense_score") or 0.0
+                    logger.info(f"[Orchestrator] RAG Chunk {i} score: {score:.4f} (Threshold: {threshold})")
+                    if score >= threshold:
+                        valid_chunks.append(c)
+                
+                if valid_chunks:
+                    formatted = [
+                        "INSTRUCTION: The customer asked a question that is answered in the "
+                        "knowledge base below. Answer it concisely (1-2 sentences) using ONLY "
+                        "the information provided. Do NOT say you are not an expert.",
+                        "--- Knowledge Base ---",
+                    ]
+                    for i, c in enumerate(valid_chunks, 1):
+                        score = c.get("rerank_score") or c.get("dense_score") or 0.0
+                        formatted.append(f"[Document {i} | Score: {score:.2f}]\n{c.get('page_content')}")
+                    
+                    logger.info(f"[Orchestrator] RAG retrieved {len(valid_chunks)} valid chunks (>={threshold}). Generating with RAG context.")
+                    return "\n\n".join(formatted)
+                else:
+                    # 4. If no valid chunks, generate directly
+                    logger.info(f"[Orchestrator] No RAG chunks met the threshold (>={threshold}). Generating directly.")
+            else:
+                logger.warning(f"[Orchestrator] RAG retrieval returned {resp.status_code}: {resp.text[:200]}. Generating directly.")
+    except Exception as e:
+        logger.error(f"[Orchestrator] RAG retrieval failed: {e}. Generating directly.")
+        
+    return None
+
+
 # ── Main Chat Processing ─────────────────────────────────────────────────────
 
 async def process_message(session_id: str, user_message: str) -> Dict:
@@ -1338,6 +1409,10 @@ async def process_message(session_id: str, user_message: str) -> Dict:
         tool_result = await auto_tool_call(session, agent, user_message)
         t_tool_ms = (time.perf_counter() - t_tool_start) * 1000
 
+        # RAG context retrieval
+        agent_doc_ids = agent.get("doc_ids", [])
+        rag_context = await fetch_rag_context(user_message, agent_doc_ids)
+
         system_prompt = build_single_prompt_system(agent, session)
 
         history = session.get_clean_history()
@@ -1354,7 +1429,7 @@ async def process_message(session_id: str, user_message: str) -> Dict:
             response = await llm_queue.run(
                 llm_engine.generate_response,
                 system_prompt, history, user_message,
-                dynamic_context=build_session_context(session, combine_tool_results(background_result, tool_result) or ""),
+                dynamic_context=build_session_context(session, combine_tool_results(background_result, tool_result, rag_context) or ""),
             )
         except Exception as e:
             logger.error(f"[Orchestrator] Single prompt LLM failed: {e}")
@@ -1391,8 +1466,17 @@ async def process_message(session_id: str, user_message: str) -> Dict:
     session.add_message("user", user_message)
     session.increment_turns()
 
-    # 2. Check global intercepts (out-of-scope, escalation) — uses get_node() cache internally
-    intercept_response = check_global_intercept(agent, user_message, session)
+    # 2a. Fetch RAG context FIRST — before the out-of-scope intercept — so that
+    #     questions answered by the knowledge base are never deflected with the
+    #     canned "not an expert" message.
+    agent_doc_ids = agent.get("doc_ids", [])
+    rag_context = await fetch_rag_context(user_message, agent_doc_ids)
+    has_rag_context = bool(rag_context)
+
+    # 2. Check global intercepts (out-of-scope, escalation).
+    # Skip the intercept entirely when RAG found relevant chunks — the user's
+    # question is answerable from the knowledge base; deflecting would be wrong.
+    intercept_response = None if has_rag_context else check_global_intercept(agent, user_message, session)
     if intercept_response:
         session.add_message("assistant", intercept_response)
         duration_ms = (time.perf_counter() - start_time) * 1000
@@ -1528,9 +1612,17 @@ async def process_message(session_id: str, user_message: str) -> Dict:
             "to re-confirm their date of birth before we continue."
             if verification_failed else None
         )
-        system_prompt = build_node_system_prompt(agent, current_node, session, note=verification_note)
+        # Pass has_rag_context so the LLM's out-of-scope deflection rule is
+        # suppressed when the knowledge base has relevant chunks for the query.
+        system_prompt = build_node_system_prompt(
+            agent, current_node, session,
+            note=verification_note,
+            has_rag_context=has_rag_context,
+        )
 
         history = session.get_clean_history()
+
+        # rag_context was already fetched above (step 2a) — reuse it here.
 
         try:
             # Run on a worker thread so the event loop stays free for dispatched
@@ -1538,7 +1630,7 @@ async def process_message(session_id: str, user_message: str) -> Dict:
             response = await llm_queue.run(
                 llm_engine.generate_response,
                 system_prompt, history[-10:], user_message,
-                dynamic_context=build_session_context(session, combine_tool_results(background_result, tool_result) or ""),
+                dynamic_context=build_session_context(session, combine_tool_results(background_result, tool_result, rag_context) or ""),
             )
         except Exception as e:
             logger.error(f"[Orchestrator] LLM failed: {e}")
@@ -1805,9 +1897,13 @@ async def _process_message_stream(session_id: str, user_message: str):
         # Tool call (non-streaming)
         tool_result = await auto_tool_call(session, agent, user_message)
 
+        # RAG context retrieval
+        agent_doc_ids = agent.get("doc_ids", [])
+        rag_context = await fetch_rag_context(user_message, agent_doc_ids)
+
         system_prompt = build_single_prompt_system(agent, session)
         history = session.get_clean_history()[-14:]
-        dynamic_ctx = build_session_context(session, combine_tool_results(background_result, tool_result) or "")
+        dynamic_ctx = build_session_context(session, combine_tool_results(background_result, tool_result, rag_context) or "")
 
         # Stream LLM response
         full_response = []
@@ -1955,7 +2051,12 @@ async def _process_message_stream(session_id: str, user_message: str):
         )
         system_prompt = build_node_system_prompt(agent, current_node, session, note=verification_note)
         history = session.get_clean_history()
-        dynamic_ctx = build_session_context(session, combine_tool_results(background_result, tool_result) or "")
+        
+        # RAG context retrieval
+        agent_doc_ids = agent.get("doc_ids", [])
+        rag_context = await fetch_rag_context(user_message, agent_doc_ids)
+        
+        dynamic_ctx = build_session_context(session, combine_tool_results(background_result, tool_result, rag_context) or "")
 
         full_response = []
         try:

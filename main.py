@@ -178,6 +178,94 @@ app.include_router(services_router)
 
 
 
+# ── Knowledge Base / RAG ────────────────────────────────────────────────────
+
+from fastapi import UploadFile, File
+from typing import List
+import httpx as _httpx
+
+_kb_router = __import__("fastapi").APIRouter(prefix="/api/knowledge-base", tags=["Knowledge Base"])
+
+
+@_kb_router.post("/upload") # use rag
+async def upload_documents(files: List[UploadFile] = File(...)):
+    """
+    Upload one or more documents to the RAG knowledge base.
+
+    Forwards every uploaded file to  ``RAG_API_URL/ingest``  as a multipart
+    POST request and collects per-file status from the RAG service response.
+
+    Args:
+        files: One or more files (PDF, DOCX, TXT, …).
+
+    Returns:
+        A summary dict with overall status and per-file details.
+    """
+    rag_ingest_url = f"{cfg.RAG_API_URL}/ingest"
+    results = []
+
+    async with _httpx.AsyncClient(timeout=120) as client:
+        for upload_file in files:
+            raw = await upload_file.read()
+            try:
+                resp = await client.post(
+                    rag_ingest_url,
+                    files=[("files", (upload_file.filename, raw, upload_file.content_type or "application/octet-stream"))],
+                )
+                if resp.status_code == 200:
+                    results.append({
+                        "filename": upload_file.filename,
+                        "status": "success",
+                        "detail": resp.json() if resp.headers.get("content-type", "").startswith("application/json") else resp.text[:300],
+                    })
+                else:
+                    results.append({
+                        "filename": upload_file.filename,
+                        "status": "error",
+                        "detail": f"RAG returned HTTP {resp.status_code}: {resp.text[:300]}",
+                    })
+            except _httpx.ConnectError:
+                results.append({
+                    "filename": upload_file.filename,
+                    "status": "error",
+                    "detail": f"Cannot connect to RAG service at {rag_ingest_url}",
+                })
+            except Exception as exc:
+                results.append({
+                    "filename": upload_file.filename,
+                    "status": "error",
+                    "detail": str(exc),
+                })
+
+    success_count = sum(1 for r in results if r["status"] == "success")
+    return {
+        "total": len(results),
+        "success": success_count,
+        "failed": len(results) - success_count,
+        "rag_ingest_url": rag_ingest_url,
+        "files": results,
+    }
+
+
+@_kb_router.get("/documents")
+async def list_documents():
+    """
+    List documents from the RAG knowledge base.
+    """
+    rag_info_url = f"{cfg.RAG_API_URL}/collections/info"
+    async with _httpx.AsyncClient(timeout=30) as client:
+        try:
+            resp = await client.get(rag_info_url)
+            if resp.status_code == 200:
+                return resp.json()
+            return {"error": f"RAG returned HTTP {resp.status_code}"}
+        except Exception as exc:
+            return {"error": str(exc)}
+
+
+app.include_router(_kb_router)
+
+
 @app.get("/health")
 def health():
     from memory_store import memory_store
