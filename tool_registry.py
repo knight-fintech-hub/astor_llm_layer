@@ -778,8 +778,11 @@ def format_tool_result(tool_id: str, new_vars: Optional[Dict[str, Any]]) -> Opti
     pretending real data came back — this is what satisfies section 6 of the
     async design (the model must be told, not left to guess).
     """
+    tool = tool_store.get(tool_id)
+    tool_name = tool["name"] if tool else tool_id
+
     if not new_vars:
-        return None
+        return f"[Tool Result: {tool_name}]\n  Error: No data returned or API call failed. Assume no records were found."
 
     if is_async_stub(new_vars):
         tool_name = new_vars[_ASYNC_STUB_KEY]

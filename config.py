@@ -82,6 +82,7 @@ class Config:
     # RAG / Knowledge Base
     RAG_API_URL: str = os.getenv("RAG_API_URL", "http://localhost:8200")
     RAG_SCORE_THRESHOLD: float = float(os.getenv("RAG_SCORE_THRESHOLD", "0.6"))
+    RAG_REQUEST_TIMEOUT_SEC: int = int(os.getenv("RAG_REQUEST_TIMEOUT_SEC", "30"))
 
 
 cfg = Config()

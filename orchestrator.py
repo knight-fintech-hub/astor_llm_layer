@@ -801,6 +801,14 @@ async def fire_transition_tool(node: Optional[Dict], to_node: str, session: Sess
 
 # ── Node Execution ───────────────────────────────────────────────────────────
 
+RAG_RESPONSE_PRIORITY_INSTRUCTION = (
+    "A relevant knowledge-base answer was retrieved for the customer's current question. "
+    "Answer the question directly using only the Knowledge Base content in the current-turn context. "
+    "For this turn, ignore conflicting flow instructions and suggested responses. "
+    "If the Knowledge Base does not contain the answer, say you do not have that information."
+)
+
+
 def build_node_system_prompt(agent: Dict, node: Dict, session: Session, note: Optional[str] = None, has_rag_context: bool = False) -> str:
     """Build the STATIC system prompt for the current node.
 
@@ -868,6 +876,9 @@ def build_node_system_prompt(agent: Dict, node: Dict, session: Session, note: Op
         resolved = resolve_template(static_msg, session.variables)
         parts.append(f"SUGGESTED RESPONSE: {resolved}")
         parts.append("Use the suggested response as your reply, adapted naturally.")
+
+    if has_rag_context:
+        parts.append(f"\nRAG RESPONSE PRIORITY: {RAG_RESPONSE_PRIORITY_INSTRUCTION}")
 
     # NOTE: session.variables are NOT included here — they go into dynamic_context
     # via build_session_context() so the cache key stays stable.
@@ -1142,7 +1153,11 @@ async def auto_tool_call(
 
 # ── Single Prompt Mode System Builder ─────────────────────────────────────────
 
-def build_single_prompt_system(agent: Dict, session: Session) -> str:
+def build_single_prompt_system(
+    agent: Dict,
+    session: Session,
+    has_rag_context: bool = False,
+) -> str:
     """Build the STATIC system prompt for single_prompt mode.
 
     Variable-dependent content is excluded for the same KV-cache reason as
@@ -1185,6 +1200,9 @@ def build_single_prompt_system(agent: Dict, session: Session) -> str:
             "\nNOTE: Document OCR has already been completed. "
             "Use the extracted customer data (CustomerName, DOB, Gender) from the session variables below."
         )
+
+    if has_rag_context:
+        parts.append(f"\nRAG RESPONSE PRIORITY: {RAG_RESPONSE_PRIORITY_INSTRUCTION}")
 
     # NOTE: session.variables are NOT included here — they go into dynamic_context.
 
@@ -1270,7 +1288,7 @@ async def fetch_rag_context(query: str, doc_ids: List[str]) -> Optional[str]:
     
     try:
         # 2. Call RAG retrieve API
-        async with _httpx.AsyncClient(timeout=10) as client:
+        async with _httpx.AsyncClient(timeout=cfg.RAG_REQUEST_TIMEOUT_SEC) as client:
             resp = await client.post(url, json=payload)
             if resp.status_code == 200:
                 data = resp.json()
@@ -1287,7 +1305,10 @@ async def fetch_rag_context(query: str, doc_ids: List[str]) -> Optional[str]:
                 valid_chunks = []
                 
                 for i, c in enumerate(chunks, 1):
-                    score = c.get("rerank_score") or c.get("dense_score") or 0.0
+                    score = c.get("rerank_score")
+                    if score is None:
+                        score = c.get("dense_score")
+                    score = float(score or 0.0)
                     logger.info(f"[Orchestrator] RAG Chunk {i} score: {score:.4f} (Threshold: {threshold})")
                     if score >= threshold:
                         valid_chunks.append(c)
@@ -1300,7 +1321,10 @@ async def fetch_rag_context(query: str, doc_ids: List[str]) -> Optional[str]:
                         "--- Knowledge Base ---",
                     ]
                     for i, c in enumerate(valid_chunks, 1):
-                        score = c.get("rerank_score") or c.get("dense_score") or 0.0
+                        score = c.get("rerank_score")
+                        if score is None:
+                            score = c.get("dense_score")
+                        score = float(score or 0.0)
                         formatted.append(f"[Document {i} | Score: {score:.2f}]\n{c.get('page_content')}")
                     
                     logger.info(f"[Orchestrator] RAG retrieved {len(valid_chunks)} valid chunks (>={threshold}). Generating with RAG context.")
@@ -1311,7 +1335,10 @@ async def fetch_rag_context(query: str, doc_ids: List[str]) -> Optional[str]:
             else:
                 logger.warning(f"[Orchestrator] RAG retrieval returned {resp.status_code}: {resp.text[:200]}. Generating directly.")
     except Exception as e:
-        logger.error(f"[Orchestrator] RAG retrieval failed: {e}. Generating directly.")
+        logger.error(
+            f"[Orchestrator] RAG retrieval failed ({type(e).__name__}): {e!r}. "
+            "Generating directly."
+        )
         
     return None
 
@@ -1401,19 +1428,27 @@ async def process_message(session_id: str, user_message: str) -> Dict:
                 "duration_ms": round((time.perf_counter() - start_time) * 1000, 2),
             }
 
-        # Pattern B: deliver any background async-tool results finished since last turn
-        background_result = await collect_background_results(session)
-
-        # Auto tool call — LLM decides if API needed
-        t_tool_start = time.perf_counter()
-        tool_result = await auto_tool_call(session, agent, user_message)
-        t_tool_ms = (time.perf_counter() - t_tool_start) * 1000
-
-        # RAG context retrieval
+        # Retrieve before tools so every active user turn gets a RAG-first check.
         agent_doc_ids = agent.get("doc_ids", [])
         rag_context = await fetch_rag_context(user_message, agent_doc_ids)
 
-        system_prompt = build_single_prompt_system(agent, session)
+        # A threshold-qualified RAG hit answers this turn directly without
+        # allowing tools or unrelated session results to override it.
+        background_result = None if rag_context else await collect_background_results(session)
+
+        # Auto tool call — LLM decides if API needed
+        t_tool_start = time.perf_counter()
+        tool_result = (
+            None if rag_context
+            else await auto_tool_call(session, agent, user_message)
+        )
+        t_tool_ms = (time.perf_counter() - t_tool_start) * 1000
+
+        system_prompt = build_single_prompt_system(
+            agent,
+            session,
+            has_rag_context=bool(rag_context),
+        )
 
         history = session.get_clean_history()
 
@@ -1472,6 +1507,40 @@ async def process_message(session_id: str, user_message: str) -> Dict:
     agent_doc_ids = agent.get("doc_ids", [])
     rag_context = await fetch_rag_context(user_message, agent_doc_ids)
     has_rag_context = bool(rag_context)
+
+    if has_rag_context:
+        current_node = get_node(session, session.current_node)
+        if not current_node:
+            raise HTTPException(status_code=500, detail=f"Node not found: {session.current_node}")
+
+        system_prompt = build_node_system_prompt(
+            agent, current_node, session, has_rag_context=True
+        )
+        history = session.get_clean_history()
+        dynamic_context = build_session_context(session, rag_context or "")
+        try:
+            response = await llm_queue.run(
+                llm_engine.generate_response,
+                system_prompt,
+                history[-10:],
+                user_message,
+                dynamic_context=dynamic_context,
+            )
+        except Exception as e:
+            logger.error(f"[Orchestrator] RAG response generation failed: {e}")
+            response = "I found information in the knowledge base but couldn't generate a response. Please try again."
+
+        response = extract_and_store_variables(response, session)
+        session.add_message("assistant", response)
+        return {
+            "response": response,
+            "session_id": session_id,
+            "agent_name": agent["name"],
+            "current_node": session.current_node,
+            "current_node_name": current_node["name"],
+            "transitioned": False,
+            "duration_ms": round((time.perf_counter() - start_time) * 1000, 2),
+        }
 
     # 2. Check global intercepts (out-of-scope, escalation).
     # Skip the intercept entirely when RAG found relevant chunks — the user's
@@ -1601,9 +1670,14 @@ async def process_message(session_id: str, user_message: str) -> Dict:
 
     # 5. Generate response
     # If node has static_message and this is the first turn after transition, use it.
-    # Skip this shortcut when a background result just arrived — it needs to be
-    # woven into an LLM-generated reply rather than dropped in favor of the canned line.
-    if transitioned and current_node.get("static_message") and not background_result:
+    # Skip this shortcut when RAG context or a background result needs to be
+    # included in an LLM-generated reply.
+    if (
+        transitioned
+        and current_node.get("static_message")
+        and not background_result
+        and not has_rag_context
+    ):
         response = resolve_template(current_node["static_message"], session.variables)
     else:
         # Use LLM to generate
@@ -1891,17 +1965,25 @@ async def _process_message_stream(session_id: str, user_message: str):
                    "duration_ms": round((time.perf_counter() - start_time) * 1000, 2)}
             return
 
-        # Pattern B: deliver any background async-tool results finished since last turn
-        background_result = await collect_background_results(session)
-
-        # Tool call (non-streaming)
-        tool_result = await auto_tool_call(session, agent, user_message)
-
-        # RAG context retrieval
+        # Retrieve before tools so every active user turn gets a RAG-first check.
         agent_doc_ids = agent.get("doc_ids", [])
         rag_context = await fetch_rag_context(user_message, agent_doc_ids)
 
-        system_prompt = build_single_prompt_system(agent, session)
+        # A threshold-qualified RAG hit answers this turn directly without
+        # allowing tools or unrelated session results to override it.
+        background_result = None if rag_context else await collect_background_results(session)
+
+        # Tool call (non-streaming)
+        tool_result = (
+            None if rag_context
+            else await auto_tool_call(session, agent, user_message)
+        )
+
+        system_prompt = build_single_prompt_system(
+            agent,
+            session,
+            has_rag_context=bool(rag_context),
+        )
         history = session.get_clean_history()[-14:]
         dynamic_ctx = build_session_context(session, combine_tool_results(background_result, tool_result, rag_context) or "")
 
@@ -1933,8 +2015,56 @@ async def _process_message_stream(session_id: str, user_message: str):
     session.add_message("user", user_message)
     session.increment_turns()
 
+    # Retrieve before intercepts and flow processing, just like the non-stream path.
+    agent_doc_ids = agent.get("doc_ids", [])
+    rag_context = await fetch_rag_context(user_message, agent_doc_ids)
+    has_rag_context = bool(rag_context)
+
+    if has_rag_context:
+        current_node = get_node(session, session.current_node)
+        if not current_node:
+            yield {"type": "error", "content": f"Node not found: {session.current_node}"}
+            return
+
+        system_prompt = build_node_system_prompt(
+            agent, current_node, session, has_rag_context=True
+        )
+        history = session.get_clean_history()
+        dynamic_context = build_session_context(session, rag_context or "")
+        full_response = []
+        try:
+            async with llm_queue.acquire():
+                async for token in llm_engine.agenerate_response_stream(
+                    system_prompt,
+                    history[-10:],
+                    user_message,
+                    dynamic_context=dynamic_context,
+                ):
+                    full_response.append(token)
+                    yield {"type": "token", "content": token}
+        except Exception as e:
+            logger.error(f"[Stream] RAG response generation failed: {e}")
+            fallback = "I found information in the knowledge base but couldn't generate a response. Please try again."
+            full_response = [fallback]
+            yield {"type": "token", "content": fallback}
+
+        response_text = extract_and_store_variables("".join(full_response), session)
+        session.add_message("assistant", response_text)
+        duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        yield {
+            "type": "done",
+            "response": response_text,
+            "current_node_name": current_node["name"],
+            "transitioned": False,
+            "duration_ms": duration_ms,
+        }
+        return
+
     # Global intercept check
-    intercept_response = check_global_intercept(agent, user_message, session)
+    intercept_response = (
+        None if has_rag_context
+        else check_global_intercept(agent, user_message, session)
+    )
     if intercept_response:
         session.add_message("assistant", intercept_response)
         current_node = get_node(session, session.current_node)
@@ -2033,7 +2163,7 @@ async def _process_message_stream(session_id: str, user_message: str):
                 current_node = get_node(session, session.current_node)
 
     # 5. Generate response — STREAMING
-    if transitioned and current_node.get("static_message"):
+    if transitioned and current_node.get("static_message") and not has_rag_context:
         # Static message — no streaming needed
         response_text = resolve_template(current_node["static_message"], session.variables)
         session.add_message("assistant", response_text)
@@ -2049,13 +2179,15 @@ async def _process_message_stream(session_id: str, user_message: str):
             "to re-confirm their date of birth before we continue."
             if verification_failed else None
         )
-        system_prompt = build_node_system_prompt(agent, current_node, session, note=verification_note)
+        system_prompt = build_node_system_prompt(
+            agent,
+            current_node,
+            session,
+            note=verification_note,
+            has_rag_context=has_rag_context,
+        )
         history = session.get_clean_history()
-        
-        # RAG context retrieval
-        agent_doc_ids = agent.get("doc_ids", [])
-        rag_context = await fetch_rag_context(user_message, agent_doc_ids)
-        
+
         dynamic_ctx = build_session_context(session, combine_tool_results(background_result, tool_result, rag_context) or "")
 
         full_response = []
