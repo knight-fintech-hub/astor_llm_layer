@@ -1,258 +1,121 @@
-# Knight Flow Generic — Dynamic Multi-Agent Platform
+# Knight Flow — Conversational Agent Platform
 
-The conversational agent platform where everything is configurable from UI — nodes, edges, tools, and agents. No code changes needed to build new conversation flows.
+Knight Flow is an AI platform that lets you build, customize, and run conversational agents without writing code. You can design conversation flows, set transition rules, connect external APIs, and test your agents directly from a clean web interface.
 
 ---
 
-## How to Run
+## Key Features
 
+- **Visual Flow Builder**: Create conversation steps (**nodes**) and movement rules (**edges**) straight from the UI.
+- **Tool Integration**: Connect external APIs (banking services, SMS, databases) that agents can call automatically during conversation.
+- **Smart Conversation Control**: Keeps dialogues natural and on-track using keyword matching, maximum turn limits, and out-of-scope protection.
+- **Knowledge Base (RAG)**: Upload documents (PDFs, text files) so agents can answer questions from your reference materials.
+- **Session Memory**: Tracks customer details, variables, and conversation history across the entire session.
+
+---
+
+## Quick Start
+
+### 1. Install Dependencies
 ```bash
-# Terminal 1 — Backend API (port 8100)
-cd knight-flow-generic
-python main.py
+pip install -r requirements.txt
+```
 
-# Terminal 2 — Gradio UI (port 7870)
-cd knight-flow-generic
+### 2. Configure Environment
+Copy or update `.env` with your settings (database, model path, ports):
+```env
+HOST=192.168.0.155      # or localhost
+PORT=1225               # Backend API port
+GRADIO_PORT=7870        # Web UI port
+DATABASE_URL=postgresql://<user>:<password>@localhost:5432/<dbname>
+MODEL_PATH=<path_to_local_llm>
+```
+
+### 3. Run the Platform
+
+**Terminal 1 — Backend API**
+```bash
+python main.py
+```
+- API Docs (Swagger): `http://localhost:1225/docs` (or your configured `PORT`)
+
+**Terminal 2 — Gradio Web UI**
+```bash
 python gradio_app.py
 ```
+- Web UI: `http://localhost:7870`
 
-- API Docs: http://localhost:8100/docs
-- Gradio UI: http://localhost:7870
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    GRADIO UI (7870)                       │
-├────────────┬────────────┬──────────────┬────────────────┤
-│  Node      │  Tool      │   Agent      │   Chat         │
-│  Builder   │  Registry  │   Builder    │   Interface    │
-└────────────┴────────────┴──────────────┴────────────────┘
-                         │
-                   ┌─────▼─────┐
-                   │ FastAPI    │ (8100)
-                   │ main.py    │
-                   └─────┬─────┘
-                         │
-          ┌──────────────┼──────────────┐
-          │              │              │
-   ┌──────▼───┐  ┌──────▼───┐  ┌──────▼───┐
-   │Orchestrator│  │CBS Data  │  │  LLM     │
-   │(brain)    │  │API       │  │  Engine  │
-   └───────────┘  └──────────┘  └──────────┘
+*(Optional)* **Terminal 3 — Knowledge Base (RAG Service)**
+```bash
+python rag_app.py
 ```
 
 ---
 
-## Folder Structure
+## How It Works
 
-```
-knight-flow-generic/
-├── .env                    — Environment configuration
-├── config.py               — Config loader (reads .env)
-├── logger.py               — Loguru logging setup
-├── requirements.txt        — Python dependencies
-├── main.py                 — FastAPI entry point, registers all routers
-├── orchestrator.py         — Runtime brain (transitions, tools, responses)
-├── llm_engine.py           — Local Qwen LLM interface
-├── memory_store.py         — Session memory management
-├── node_manager.py         — Node CRUD API
-├── edge_manager.py         — Edge CRUD API
-├── agent_manager.py        — Agent CRUD API
-├── tool_registry.py        — Tool registration & execution
-├── cbs_api.py              — CBS data API + backend services
-├── gradio_app.py           — Gradio UI (5 tabs)
-├── customer_master_data/   — Mock banking data (CSVs)
-│   ├── customer_master_data.csv
-│   ├── account_data.csv
-│   ├── loan_data (1).csv
-│   └── transaction_history.csv
-└── data/                   — Runtime JSON data (user-configurable)
-    ├── nodes.json
-    ├── edges.json
-    ├── tools.json
-    ├── agents.json
-    ├── subflows.json
-    └── sessions.json
-```
+A conversation in Knight Flow runs through a straightforward lifecycle:
+
+1. **Start Call**: A user selects an agent and customer. The engine loads user data and sends the initial greeting.
+2. **Listen & Transition**: When the user replies, the engine checks the transition rules (keywords/intents) to decide the next step.
+3. **Generate Response**:
+   - If the new step has a fixed message, it responds immediately without delay.
+   - Otherwise, the LLM generates a contextual response based on the step instructions.
+4. **Run Tools**: If a step requires external data (e.g., checking an account balance or saving a promise-to-pay), the agent runs the API and saves the result to session memory.
+5. **End Call**: Once the goal is met or the closing step triggers, the conversation safely concludes.
 
 ---
 
-## File-by-File Explanation
+## Core Concepts
 
-### Core Files
-
-| File | Purpose | What Happens Inside |
-|------|---------|---------------------|
-| **main.py** | FastAPI entry point | Creates app, adds CORS, registers all routers (nodes, edges, tools, agents, chat, cbs, services, subflows). Health check at `/health`. |
-| **config.py** | Configuration | Loads `.env` file. Defines HOST, PORT, MODEL_PATH, MAX_NEW_TOKENS, TEMPERATURE, LENDER_NAME, GRADIO_PORT, DATA_DIR. |
-| **logger.py** | Logging | Loguru setup with colored console output. All files import `get_logger()` from here. |
-| **.env** | Environment variables | Server port (8100), model path, LLM params, lender name, Gradio port (7870). |
-
-### Orchestrator (Brain)
-
-| File | Purpose | What Happens Inside |
-|------|---------|---------------------|
-| **orchestrator.py** | Runtime engine | The main brain. Handles: (1) Start chat — create session, load CBS data, send greeting. (2) Process message — evaluate edge keywords, transition nodes, generate LLM response. (3) Out-of-scope detection — blocks off-topic questions. (4) Max turns enforcement — force-transitions when node exceeds turn limit. (5) __END__ blocking — stops accepting messages after call ends. (6) Subflow CRUD endpoints. |
-| **llm_engine.py** | LLM interface | Loads Qwen model with 4-bit quantization on GPU. Three functions: `generate_response()` — produces agent replies. `flex_mode_evaluate()` — LLM picks best node (disabled currently). `detect_tool_intent()` — LLM decides which tool to call (for subagent nodes). |
-| **memory_store.py** | Session state | Session class tracks: current_node, previous_node, variables dict, conversation history, node_turns counter, swap_history, status. MemoryStore manages all active sessions. Supports agent swapping with memory transfer. |
-
-### CRUD Managers
-
-| File | Purpose | What Happens Inside |
-|------|---------|---------------------|
-| **node_manager.py** | Node CRUD | Manages conversation nodes. Each node has: name, type (conversation/function/subagent), prompt (LLM instruction), static_message (fixed response), tools (assigned APIs), is_global flag, max_turns. Reads/writes `data/nodes.json`. API: POST/GET/PUT/DELETE `/api/nodes`. |
-| **edge_manager.py** | Edge CRUD | Manages transitions between nodes. Each edge has: from_node, to_node, condition (natural language), keywords (fast-match list), priority. Reads/writes `data/edges.json`. API: POST/GET/PUT/DELETE `/api/edges`. |
-| **tool_registry.py** | Tool CRUD + Execution | Registers external APIs. Each tool has: name, method, endpoint (with {Variable} placeholders), params, response_mapping (maps API response fields to session variables). `execute_tool()` resolves variables, makes HTTP call, maps response back. API: POST/GET/PUT/DELETE `/api/tools`. |
-| **agent_manager.py** | Agent CRUD | Manages agents. Each agent has: name, system_prompt, start_node, assigned nodes list, global_nodes list, language,    personality, swap_rules. API: POST/GET/PUT/DELETE `/api/agents`. |
-
-### Data & Services
-
-| File | Purpose | What Happens Inside |
-|------|---------|---------------------|
-| **cbs_api.py** | CBS Data + Backend Services | Loads CSVs (customers, accounts, loans, transactions) into memory. Endpoints: `/api/cbs/customers`, `/api/cbs/summary/{mobile}`, `/api/cbs/transactions/{account_no}`. Also has simulated services: POST `/api/services/verify` (DOB check), POST `/api/services/ptp/create` (Promise to Pay), POST `/api/services/sms/send` (SMS notification). |
-| **gradio_app.py** | UI | 5-tab Gradio interface. Tab 1: Node Builder (create/delete nodes). Tab 2: Edge Builder (hidden). Tab 3: Tool Registry (register APIs). Tab 4: Agent Builder (build agents from nodes). Tab 5: Chat (select agent + customer, start call, send messages). |
+| Concept | What It Is |
+|---|---|
+| **Agent** | The AI assistant (e.g. Loan Officer, Support Bot) with a specific persona and assigned workflow. |
+| **Node** | A single step or phase in the conversation (e.g. Greeting, Identity Check, Payment Discussion, Closing). |
+| **Edge** | The rule connecting one node to another based on user responses. |
+| **Tool** | An external API that agents can trigger to fetch or submit data. |
+| **RAG** | Knowledge search that lets agents look up answers in uploaded reference documents. |
 
 ---
 
-## Data Files (data/)
+## Web UI Tabs
 
-| File | What It Stores | User Editable From |
-|------|----------------|-------------------|
-| **nodes.json** | All conversation nodes (9 default: greeting, verification, loan_reminder, payment_discussion, payment_commitment, confirmation, closing, out_of_scope, escalation) | Node Builder tab |
-| **edges.json** | All transitions (9 default: greeting→verification→loan_reminder→payment_discussion→payment_commitment→confirmation→closing→END) | Edge Builder tab |
-| **tools.json** | Registered APIs (5 default: cbs_lookup, verify_customer, create_ptp, send_sms, get_transactions) | Tool Registry tab |
-| **agents.json** | Agent configurations (1 default: Collection Agent) | Agent Builder tab |
-| **subflows.json** | Reusable node groups (1 default: Identity Verification) | API only |
-| **sessions.json** | Placeholder (sessions are in-memory) | — |
+- **Tool Registry**: Register and test external APIs with custom parameters and responses.
+- **Agent Builder**: Create agents, define conversation steps (nodes), and configure transition rules.
+- **Chat**: Test agents in real time, view customer profile data, and observe live step transitions.
 
 ---
 
-## How a Message Flows (Runtime)
+## Project Structure
 
 ```
-1. User clicks "Start Call" with agent + customer selected
-   → POST /api1623/start
-   → Create session, load CBS data (CustomerName, EMI, etc.)
-   → Move to start_node (greeting_01)
-   → Return greeting: "Hello {CustomerName}, I am calling from Knight Gini..."
-
-2. User types "yes"
-   → POST /api/chat {session_id, message}
-   → orchestrator.process_message():
-     a. Check if session ended → No, continue
-     b. Check out-of-scope → No
-     c. Evaluate edges from greeting_01:
-        - edge_001 keywords: ["yes", "speaking"...] → "yes" MATCHES!
-        - Transition to verification_01
-     d. verification_01 has static_message → return it
-   → Response: "Please confirm your Date of Birth?"
-
-3. User types "07071996"
-   → Evaluate edges from verification_01:
-     - edge_002: no keywords, no match
-     - max_turns check: turns(1) < max(3) → stay
-   → LLM generates response using verification node prompt
-   → Response: "Thank you, verified. Your EMI of Rs.30843..."
-   (Note: may transition via max_turns if no edge matches after 3 attempts)
-
-4. User types "i dont have money" (in payment_discussion)
-   → Evaluate edges:
-     - edge_005 keywords: "next month", "will pay"... → NO match
-     - edge_006 keywords: "stop calling", "never paying"... → NO match
-   → No transition, stays in payment_discussion
-   → LLM generates: "I understand. When do you expect to make the payment?"
-
-5. User types "next month"
-   → edge_005 keyword "next month" → MATCH
-   → Transition to payment_commitment_01
-   → Static message: "Would you be able to make payment by that date?"
+knight/
+├── main.py              # FastAPI server entry point & route definitions
+├── orchestrator.py      # Runtime brain (conversation flow, transitions, session logic)
+├── gradio_app.py        # Web interface (Agent Builder, Tool Registry, Chat)
+├── llm_engine.py        # Local LLM loader and prompt generation
+├── memory_store.py      # Session memory and state management
+├── tool_registry.py     # API tool registration and execution
+├── cbs_api.py           # Core banking mock data and service endpoints
+├── rag_app.py           # Knowledge base document upload and retrieval service
+├── database.py          # PostgreSQL database connection and setup
+├── config.py            # Central configuration loader (.env)
+└── requirements.txt     # Python package requirements
 ```
 
 ---
 
-## Key Design Decisions
+## Main API Endpoints
 
-| Decision | Why |
-|----------|-----|
-| **Keyword-only transitions (LLM evaluation disabled)** | Local Qwen 7B model gives unreliable yes/no answers for condition matching. Keywords are fast and deterministic. |
-| **Flex Mode disabled** | Same reason — LLM picks wrong nodes. Can re-enable with better model (GPT-4o). |
-| **Static message on transition** | Instant response when entering new node (no LLM call = zero latency). LLM used only when staying in same node. |
-| **Max turns enforcement** | Prevents infinite loops. After N turns without edge match, force-transitions to first available edge. |
-| **Session end blocking** | Once __END__ reached, all further messages return fixed response. |
-| **max_new_tokens=150** | Keeps responses short (phone call style). |
-
----
-
-## Node Types
-
-| Type | Behavior |
-|------|----------|
-| **conversation** | Multi-turn dialogue. LLM generates responses. Most common. |
-| **function** | Executes tools ON ENTRY. No dialogue. Auto-transitions after. |
-| **subagent** | Dialogue + LLM-driven tool calling. LLM decides which tool to use based on conversation. |
-
----
-
-## Features Implemented
-
-- [x] Dynamic node creation (UI)
-- [x] Dynamic edge creation with keywords + conditions
-- [x] Tool/API registration and execution
-- [x] Agent builder (assign nodes, global nodes)
-- [x] Keyword-based transition matching
-- [x] LLM transition evaluation (disabled, ready for cloud API)
-- [x] Flex Mode — LLM jumps nodes (disabled, ready)
-- [x] Subagent Node — LLM decides tools
-- [x] Subflows — reusable node groups
-- [x] Global nodes (out-of-scope, escalation)
-- [x] Session memory with variable tracking
-- [x] Agent swap rules (memory transfer ready)
-- [x] Out-of-scope detection
-- [x] Max turns enforcement
-- [x] __END__ state enforcement
-- [x] Word boundary matching for short keywords
-- [x] CBS mock data integration
-- [x] Simulated backend services (PTP, Verify, SMS)
-
----
-
-## API Endpoints Summary
-
-| Group | Endpoints |
-|-------|-----------|
-| **Nodes** | POST/GET/PUT/DELETE `/api/nodes`, GET `/api/nodes/{id}` |
-| **Edges** | POST/GET/PUT/DELETE `/api/edges`, GET `/api/edges/from/{node_id}` |
-| **Tools** | POST/GET/PUT/DELETE `/api/tools`, POST `/api/tools/{id}/execute` |
-| **Agents** | POST/GET/PUT/DELETE `/api/agents` |
-| **Chat** | POST `/api/chat/start`, POST `/api/chat`, GET `/api/chat/session/{id}` |
-| **Model** | GET `/api/chat/model/status`, POST `/api/chat/model/load` |
-| **Subflows** | POST/GET/DELETE `/api/subflows` |
-| **CBS** | GET `/api/cbs/customers`, GET `/api/cbs/summary/{mobile}` |
-| **Services** | POST `/api/services/verify`, POST `/api/services/ptp/create`, POST `/api/services/sms/send` |
-
----
-
-## Dependencies
-
-```
-fastapi, uvicorn, pydantic, loguru, python-dotenv, httpx, gradio
-torch, transformers, bitsandbytes, accelerate
-```
-
----
-
-## Configuration (.env)
-
-```env
-HOST=0.0.0.0
-PORT=8100
-MODEL_PATH=<path to Qwen model>
-MAX_NEW_TOKENS=150
-TEMPERATURE=0.7
-LENDER_NAME=Knight Gini
-GRADIO_PORT=7870
-LOG_LEVEL=INFO
-```
+| Category | Method & Endpoint | Description |
+|---|---|---|
+| **Chat** | `POST /api/chat/start` | Start a new session with an agent |
+| | `POST /api/chat` | Send a user message and receive the agent's response |
+| | `GET /api/chat/session/{id}` | Retrieve session state and chat history |
+| **Agents** | `GET /api/agents` | List all available agents |
+| | `POST /api/agents` | Create or update an agent configuration |
+| **Nodes** | `GET /api/nodes` | List all conversation nodes |
+| **Tools** | `GET /api/tools` | List registered API tools |
+| | `POST /api/tools/{id}/execute` | Test or run a specific API tool |
+| **Knowledge Base** | `POST /api/knowledge-base/upload` | Upload documents to the knowledge base |
+| **System** | `GET /health` | Service health and memory status |

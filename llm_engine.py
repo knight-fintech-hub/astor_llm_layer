@@ -611,6 +611,7 @@ class LLMEngine:
         history: List[Dict[str, str]],
         user_message: str,
         dynamic_context: str = "",
+        chat_history: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """
         Generate agent response.
@@ -626,6 +627,7 @@ class LLMEngine:
                              Built by build_session_context() in orchestrator.
                              Injected as a context message BEFORE the user turn
                              so the system prompt stays stable across turns.
+            chat_history: Optional prior messages retrieved from RAG session history.
 
         When the system-prompt KV cache is active (CUDA + KV_CACHE_ENABLED),
         the system prompt tokens are processed only once and their key/value
@@ -635,6 +637,12 @@ class LLMEngine:
             self.load()
 
         max_tokens = cfg.MAX_NEW_TOKENS
+
+        # Defend against positional argument swap (arg3=chat_history, arg4=user_message)
+        if not isinstance(user_message, str) and isinstance(dynamic_context, str):
+            chat_history = user_message
+            user_message = dynamic_context
+            dynamic_context = ""
 
         try:
             if self._kv_cache is not None:
@@ -648,6 +656,16 @@ class LLMEngine:
                         "role": "assistant",
                         "content": "Understood, I have the context.",
                     })
+                if chat_history and isinstance(chat_history, list):
+                    for msg in chat_history:
+                        if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                            if msg not in remaining_messages:
+                                remaining_messages.append({"role": msg["role"], "content": msg["content"]})
+                        elif isinstance(msg, str) and msg.strip():
+                            remaining_messages.append({"role": "system", "content": msg})
+                elif isinstance(chat_history, str) and chat_history.strip():
+                    remaining_messages.append({"role": "system", "content": f"Prior chat history:\n{chat_history}"})
+
                 remaining_messages.append({"role": "user", "content": user_message})
 
                 response = self._generate_with_kv_cache(
@@ -667,6 +685,16 @@ class LLMEngine:
                         "role": "assistant",
                         "content": "Understood, I have the context.",
                     })
+                if chat_history and isinstance(chat_history, list):
+                    for msg in chat_history:
+                        if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                            if msg not in messages:
+                                messages.append({"role": msg["role"], "content": msg["content"]})
+                        elif isinstance(msg, str) and msg.strip():
+                            messages.append({"role": "system", "content": msg})
+                elif isinstance(chat_history, str) and chat_history.strip():
+                    messages.append({"role": "system", "content": f"Prior chat history:\n{chat_history}"})
+
                 messages.append({"role": "user", "content": user_message})
                 response = self._generate(messages)
 
@@ -758,6 +786,7 @@ class LLMEngine:
         history: List[Dict[str, str]],
         user_message: str,
         dynamic_context: str = "",
+        chat_history: Optional[List[Dict[str, Any]]] = None,
     ):
         """
         Streaming version of generate_response().
@@ -774,6 +803,12 @@ class LLMEngine:
 
         max_tokens = cfg.MAX_NEW_TOKENS
 
+        # Defend against positional argument swap (arg3=chat_history, arg4=user_message)
+        if not isinstance(user_message, str) and isinstance(dynamic_context, str):
+            chat_history = user_message
+            user_message = dynamic_context
+            dynamic_context = ""
+
         if self._kv_cache is not None:
             remaining_messages = list(history)
             if dynamic_context:
@@ -785,6 +820,16 @@ class LLMEngine:
                     "role": "assistant",
                     "content": "Understood, I have the context.",
                 })
+            if chat_history and isinstance(chat_history, list):
+                for msg in chat_history:
+                    if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                        if msg not in remaining_messages:
+                            remaining_messages.append({"role": msg["role"], "content": msg["content"]})
+                    elif isinstance(msg, str) and msg.strip():
+                        remaining_messages.append({"role": "system", "content": msg})
+            elif isinstance(chat_history, str) and chat_history.strip():
+                remaining_messages.append({"role": "system", "content": f"Prior chat history:\n{chat_history}"})
+
             remaining_messages.append({"role": "user", "content": user_message})
 
             raw = self._generate_with_kv_cache_stream(
@@ -804,6 +849,16 @@ class LLMEngine:
                     "role": "assistant",
                     "content": "Understood, I have the context.",
                 })
+            if chat_history and isinstance(chat_history, list):
+                for msg in chat_history:
+                    if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                        if msg not in messages:
+                            messages.append({"role": msg["role"], "content": msg["content"]})
+                    elif isinstance(msg, str) and msg.strip():
+                        messages.append({"role": "system", "content": msg})
+            elif isinstance(chat_history, str) and chat_history.strip():
+                messages.append({"role": "system", "content": f"Prior chat history:\n{chat_history}"})
+
             messages.append({"role": "user", "content": user_message})
 
             raw = self._generate_stream(messages, max_tokens)
@@ -817,6 +872,7 @@ class LLMEngine:
         history: List[Dict[str, str]],
         user_message: str,
         dynamic_context: str = "",
+        chat_history: Optional[List[Dict[str, Any]]] = None,
     ):
         """
         Async-generator bridge for generate_response_stream().
@@ -838,6 +894,12 @@ class LLMEngine:
         iteration, so the loop stays free for the tool call's real duration,
         not just the brief gaps between already-started tokens.
         """
+        # Defend against positional argument swap (arg3=chat_history, arg4=user_message)
+        if not isinstance(user_message, str) and isinstance(dynamic_context, str):
+            chat_history = user_message
+            user_message = dynamic_context
+            dynamic_context = ""
+
         import queue as _queue
 
         q: "_queue.Queue" = _queue.Queue()
@@ -846,7 +908,11 @@ class LLMEngine:
         def _worker():
             try:
                 for chunk in self.generate_response_stream(
-                    system_prompt, history, user_message, dynamic_context
+                    system_prompt=system_prompt,
+                    history=history,
+                    user_message=user_message,
+                    dynamic_context=dynamic_context,
+                    chat_history=chat_history,
                 ):
                     q.put(chunk)
             except Exception as exc:  # noqa: BLE001 — relayed to the caller below
