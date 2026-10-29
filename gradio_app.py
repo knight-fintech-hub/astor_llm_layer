@@ -11,7 +11,7 @@ import json
 import httpx
 import gradio as gr
 from config import cfg
-API_BASE = "http://192.168.0.155:1230"
+API_BASE = "http://192.168.0.155:1225"
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────
@@ -32,7 +32,7 @@ def api(method, endpoint, json_data=None):
             return None, "Bad method"
         if r.status_code == 200:
             return r.json(), None
-        return None, f"Error {r.status_code}: {r.text[:200]}"
+        return None, f"Error {r.status_code}: {r.text[:200]}"   
     except httpx.ConnectError:
         return None, "Server not running (port 8101)"
     except httpx.TimeoutException:
@@ -1575,4 +1575,4 @@ if __name__ == "__main__":
     print("  Backend:  python main.py  (port 8101)")
     print("  Frontend: python gradio_app.py")
     print("=" * 55 + "\n")
-    app.launch(server_port=1338, share=True)
+    app.launch(server_name="192.168.0.155", server_port=1338, share=True)

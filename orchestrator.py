@@ -18,7 +18,7 @@ import os
 import re
 import time
 from datetime import date
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 import asyncio
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -1269,20 +1269,18 @@ async def collect_background_results(session: Session) -> Optional[str]:
     return "\n\n".join(blocks)
 
 
-async def fetch_rag_context(query: str, doc_ids: List[str], session_id: str) -> Tuple[Optional[str], Optional[List[Dict[str, Any]]]]:
+async def fetch_rag_context(query: str, doc_ids: List[str]) -> Optional[str]:
     """Fetch relevant chunks from the RAG knowledge base if doc_ids are attached."""
     import httpx as _httpx
     # 1. Check if selected agent has doc_ids binded
     if not doc_ids:
         logger.info("[Orchestrator] No doc ids found for this agent. Generating directly.")
-        return None, None
+        return None
         
     logger.info(f"[Orchestrator] Doc ids found: {doc_ids}. Using RAG first approach.")
     url = f"{cfg.RAG_API_URL}/retrieve"
     payload = {
         "query": query,
-        "session_id": session_id,
-        "session": session_id,
         "doc_ids": doc_ids,
         "collection_name": "",
         "top_n": 3
@@ -1297,14 +1295,10 @@ async def fetch_rag_context(query: str, doc_ids: List[str], session_id: str) -> 
                 
                 # Save the response for chunk verification
                 import json
-                try:
-                    with open("rag_response.json", "w", encoding="utf-8") as f:
-                        json.dump(data, f, indent=4, ensure_ascii=False)
-                except Exception:
-                    pass
+                with open("rag_response.json", "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=4, ensure_ascii=False)
                     
-                chunks = data.get("chunks", []) or []
-                chat_history = data.get("chat_history", []) or []
+                chunks = data.get("chunks", [])
                 
                 # 3. Match score with threshold
                 threshold = getattr(cfg, "RAG_SCORE_THRESHOLD", 0.6)
@@ -1334,12 +1328,10 @@ async def fetch_rag_context(query: str, doc_ids: List[str], session_id: str) -> 
                         formatted.append(f"[Document {i} | Score: {score:.2f}]\n{c.get('page_content')}")
                     
                     logger.info(f"[Orchestrator] RAG retrieved {len(valid_chunks)} valid chunks (>={threshold}). Generating with RAG context.")
-                    return "\n\n".join(formatted), chat_history
-
+                    return "\n\n".join(formatted)
                 else:
                     # 4. If no valid chunks, generate directly
                     logger.info(f"[Orchestrator] No RAG chunks met the threshold (>={threshold}). Generating directly.")
-                    return None, chat_history
             else:
                 logger.warning(f"[Orchestrator] RAG retrieval returned {resp.status_code}: {resp.text[:200]}. Generating directly.")
     except Exception as e:
@@ -1348,7 +1340,7 @@ async def fetch_rag_context(query: str, doc_ids: List[str], session_id: str) -> 
             "Generating directly."
         )
         
-    return None, None
+    return None
 
 
 # ── Main Chat Processing ─────────────────────────────────────────────────────
@@ -1438,7 +1430,7 @@ async def process_message(session_id: str, user_message: str) -> Dict:
 
         # Retrieve before tools so every active user turn gets a RAG-first check.
         agent_doc_ids = agent.get("doc_ids", [])
-        rag_context, chat_hist = await fetch_rag_context(user_message, agent_doc_ids, session_id)
+        rag_context = await fetch_rag_context(user_message, agent_doc_ids)
 
         # A threshold-qualified RAG hit answers this turn directly without
         # allowing tools or unrelated session results to override it.
@@ -1471,11 +1463,8 @@ async def process_message(session_id: str, user_message: str) -> Dict:
             # call here freezes the whole event loop until generation finishes).
             response = await llm_queue.run(
                 llm_engine.generate_response,
-                system_prompt,
-                history,
-                user_message,
+                system_prompt, history, user_message,
                 dynamic_context=build_session_context(session, combine_tool_results(background_result, tool_result, rag_context) or ""),
-                chat_history=chat_hist,
             )
         except Exception as e:
             logger.error(f"[Orchestrator] Single prompt LLM failed: {e}")
@@ -1516,7 +1505,7 @@ async def process_message(session_id: str, user_message: str) -> Dict:
     #     questions answered by the knowledge base are never deflected with the
     #     canned "not an expert" message.
     agent_doc_ids = agent.get("doc_ids", [])
-    rag_context, chat_hist = await fetch_rag_context(user_message, agent_doc_ids, session_id)
+    rag_context = await fetch_rag_context(user_message, agent_doc_ids)
     has_rag_context = bool(rag_context)
 
     if has_rag_context:
@@ -1536,7 +1525,6 @@ async def process_message(session_id: str, user_message: str) -> Dict:
                 history[-10:],
                 user_message,
                 dynamic_context=dynamic_context,
-                chat_history=chat_hist,
             )
         except Exception as e:
             logger.error(f"[Orchestrator] RAG response generation failed: {e}")
@@ -1715,11 +1703,8 @@ async def process_message(session_id: str, user_message: str) -> Dict:
             # async tools' HTTP calls to actually progress during generation.
             response = await llm_queue.run(
                 llm_engine.generate_response,
-                system_prompt,
-                history[-10:],
-                user_message,
+                system_prompt, history[-10:], user_message,
                 dynamic_context=build_session_context(session, combine_tool_results(background_result, tool_result, rag_context) or ""),
-                chat_history=chat_hist,
             )
         except Exception as e:
             logger.error(f"[Orchestrator] LLM failed: {e}")
@@ -1834,8 +1819,6 @@ async def start_chat(req: StartChatRequest):
                 session.set_variable("OutstandingPrincipal", loan.get("principal", "0"))
                 session.set_variable("RemainingEMIs", loan.get("remaining_emis", "0"))
             session.set_variable("TotalOverdue", str(summary.get("total_overdue", 0)))
-
-    session.save_state()
 
     # Generate greeting based on mode
     if agent_mode == "single_prompt":
@@ -1984,7 +1967,7 @@ async def _process_message_stream(session_id: str, user_message: str):
 
         # Retrieve before tools so every active user turn gets a RAG-first check.
         agent_doc_ids = agent.get("doc_ids", [])
-        rag_context, chat_hist = await fetch_rag_context(user_message, agent_doc_ids, session_id)
+        rag_context = await fetch_rag_context(user_message, agent_doc_ids)
 
         # A threshold-qualified RAG hit answers this turn directly without
         # allowing tools or unrelated session results to override it.
@@ -2009,11 +1992,7 @@ async def _process_message_stream(session_id: str, user_message: str):
         try:
             async with llm_queue.acquire():
                 async for token in llm_engine.agenerate_response_stream(
-                    system_prompt,
-                    history,
-                    user_message,
-                    dynamic_context=dynamic_ctx,
-                    chat_history=chat_hist,
+                    system_prompt, history, user_message, dynamic_context=dynamic_ctx
                 ):
                     full_response.append(token)
                     yield {"type": "token", "content": token}
@@ -2038,7 +2017,7 @@ async def _process_message_stream(session_id: str, user_message: str):
 
     # Retrieve before intercepts and flow processing, just like the non-stream path.
     agent_doc_ids = agent.get("doc_ids", [])
-    rag_context, chat_hist = await fetch_rag_context(user_message, agent_doc_ids,session_id)
+    rag_context = await fetch_rag_context(user_message, agent_doc_ids)
     has_rag_context = bool(rag_context)
 
     if has_rag_context:
@@ -2060,7 +2039,6 @@ async def _process_message_stream(session_id: str, user_message: str):
                     history[-10:],
                     user_message,
                     dynamic_context=dynamic_context,
-                    chat_history=chat_hist,
                 ):
                     full_response.append(token)
                     yield {"type": "token", "content": token}
@@ -2216,11 +2194,7 @@ async def _process_message_stream(session_id: str, user_message: str):
         try:
             async with llm_queue.acquire():
                 async for token in llm_engine.agenerate_response_stream(
-                    system_prompt,
-                    history[-10:],
-                    user_message,
-                    dynamic_context=dynamic_ctx,
-                    chat_history=chat_hist,
+                    system_prompt, history[-10:], user_message, dynamic_context=dynamic_ctx
                 ):
                     full_response.append(token)
                     yield {"type": "token", "content": token}

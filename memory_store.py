@@ -227,22 +227,9 @@ class MemoryStore:
         # Insert into DB
         execute_write(
             """INSERT INTO sessions 
-               (session_id, agent_id, current_node, previous_node, variables,
-                node_turns, node_tools_executed, status, swap_history, started_at, ended_at)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-            (
-                session_id,
-                agent_id,
-                start_node,
-                None,
-                json.dumps({}),
-                0,
-                False,
-                "active",
-                json.dumps([]),
-                now,
-                None,
-            ),
+               (session_id, agent_id, current_node, variables, node_turns, status, started_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+            (session_id, agent_id, start_node, json.dumps({}), 0, "active", now),
         )
 
         # Create in-memory session
@@ -285,7 +272,7 @@ class MemoryStore:
 
         # Reload messages from DB
         messages = execute_query(
-            "SELECT role, content, node, created_at FROM messages WHERE session_id = %s ORDER BY message_id",
+            "SELECT role, content, node, created_at FROM messages WHERE session_id = %s ORDER BY id",
             (session_id,),
         )
         session.history = [
